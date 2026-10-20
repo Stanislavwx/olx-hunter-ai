@@ -1,7 +1,8 @@
 """
 ai_analyzer.py — Google Gemini multimodal analysis with structured JSON output.
 
-Sends listing metadata + images to Gemini and enforces a strict response schema:
+Uses official `google.genai` SDK with automatic retries for transient 503/429 spikes
+and enforces strict JSON schema:
   {
     "is_good_deal": bool,
     "confidence":   int  (0-100),
@@ -10,52 +11,42 @@ Sends listing metadata + images to Gemini and enforces a strict response schema:
   }
 """
 
+import asyncio
 import json
 import logging
 import os
 from typing import Any
 
-import google.generativeai as genai
-from google.generativeai.types import GenerationConfig
+from google import genai
+from google.genai import types
 
 logger = logging.getLogger(__name__)
 
-# JSON schema enforced via response_mime_type + response_schema
+# JSON schema enforced via GenerateContentConfig
 RESPONSE_SCHEMA = {
-    "type": "object",
+    "type": "OBJECT",
     "properties": {
-        "is_good_deal": {"type": "boolean"},
-        "confidence": {"type": "integer"},
-        "extracted_specs": {"type": "string"},
-        "reason": {"type": "string"},
+        "is_good_deal": {"type": "BOOLEAN"},
+        "confidence": {"type": "INTEGER"},
+        "extracted_specs": {"type": "STRING"},
+        "reason": {"type": "STRING"},
     },
     "required": ["is_good_deal", "confidence", "extracted_specs", "reason"],
 }
 
-_model: genai.GenerativeModel | None = None
+_client: genai.Client | None = None
 
 
-def _get_model() -> genai.GenerativeModel:
-    """Lazy-initialise and cache the Gemini model instance."""
-    global _model
-    if _model is None:
+def _get_client() -> genai.Client:
+    """Lazy-initialise and cache the Gemini client."""
+    global _client
+    if _client is None:
         api_key = os.environ.get("GEMINI_API_KEY")
         if not api_key:
             raise EnvironmentError("GEMINI_API_KEY is not set in the environment.")
-        genai.configure(api_key=api_key)
-
-        model_name = os.environ.get("GEMINI_MODEL_NAME", "gemini-2.0-flash")
-        _model = genai.GenerativeModel(
-            model_name=model_name,
-            generation_config=GenerationConfig(
-                response_mime_type="application/json",
-                response_schema=RESPONSE_SCHEMA,
-                temperature=0.2,   # low temp for deterministic, factual evaluation
-                max_output_tokens=1024,
-            ),
-        )
-        logger.info("Gemini model initialised: %s", model_name)
-    return _model
+        _client = genai.Client(api_key=api_key)
+        logger.info("Gemini client initialised successfully.")
+    return _client
 
 
 def _build_prompt(offer: dict[str, Any], task_prompt: str) -> str:
@@ -78,7 +69,7 @@ def _build_prompt(offer: dict[str, Any], task_prompt: str) -> str:
         f"DESCRIPTION (first 800 chars):\n{description[:800]}\n\n"
         f"---\n"
         f"EXPERT EVALUATION TASK:\n{task_prompt}\n\n"
-        f"Analyse the listing text and ALL attached images carefully. "
+        f"Analyse the listing text and attached images carefully. "
         f"Return ONLY a valid JSON object matching the required schema. "
         f"Be concise in extracted_specs and reason (max 300 chars each)."
     )
@@ -88,39 +79,67 @@ async def analyze_offer(
     offer: dict[str, Any],
     image_bytes_list: list[bytes],
     task_prompt: str,
+    max_retries: int = 4,
 ) -> dict[str, Any] | None:
     """
     Send an offer + images to Gemini and return the structured analysis result.
 
-    Args:
-        offer:            Raw OLX offer dict.
-        image_bytes_list: Downloaded image bytes (max 4).
-        task_prompt:      The per-task AI prompt from config.json.
-
-    Returns:
-        Parsed dict with keys: is_good_deal, confidence, extracted_specs, reason.
-        Returns None on any error so the daemon continues processing other offers.
+    Includes automatic retry for transient 503 / 429 API spikes.
     """
     try:
-        model = _get_model()
+        client = _get_client()
+        model_name = os.environ.get("GEMINI_MODEL_NAME", "gemini-3.1-flash-lite-preview")
         prompt_text = _build_prompt(offer, task_prompt)
 
-        # Build multimodal content parts: text + image blobs
-        content_parts: list[Any] = [prompt_text]
+        # Build contents: prompt + binary images
+        contents: list[Any] = [prompt_text]
         for img_bytes in image_bytes_list:
-            content_parts.append(
-                {"mime_type": "image/jpeg", "data": img_bytes}
+            contents.append(
+                types.Part.from_bytes(data=img_bytes, mime_type="image/jpeg")
             )
 
         logger.info(
-            "Sending offer '%s' to Gemini with %d image(s) …",
+            "Sending offer '%s' to Gemini (%s) with %d image(s) …",
             offer.get("title", "unknown")[:60],
+            model_name,
             len(image_bytes_list),
         )
 
-        response = await model.generate_content_async(content_parts)
-        raw_text = response.text.strip()
+        config = types.GenerateContentConfig(
+            response_mime_type="application/json",
+            response_schema=RESPONSE_SCHEMA,
+            temperature=0.2,
+            max_output_tokens=1024,
+        )
 
+        backoff = 3.0
+        response = None
+        for attempt in range(1, max_retries + 1):
+            try:
+                response = await asyncio.to_thread(
+                    client.models.generate_content,
+                    model=model_name,
+                    contents=contents,
+                    config=config,
+                )
+                break
+            except Exception as exc:
+                err_msg = str(exc)
+                if ("503" in err_msg or "429" in err_msg or "UNAVAILABLE" in err_msg) and attempt < max_retries:
+                    logger.warning(
+                        "Gemini API transient error (%s). Retrying attempt %d/%d in %.1fs …",
+                        err_msg[:100], attempt, max_retries, backoff
+                    )
+                    await asyncio.sleep(backoff)
+                    backoff *= 2.0
+                else:
+                    raise
+
+        if not response or not response.text:
+            logger.error("Empty response from Gemini")
+            return None
+
+        raw_text = response.text.strip()
         result: dict[str, Any] = json.loads(raw_text)
 
         # Validate required keys
@@ -142,7 +161,7 @@ async def analyze_offer(
         return result
 
     except json.JSONDecodeError as exc:
-        logger.error("Gemini returned non-JSON response: %s — %s", exc, response.text if 'response' in dir() else "no response")  # type: ignore[possibly-undefined]
+        logger.error("Gemini returned non-JSON response: %s", exc)
         return None
     except Exception as exc:  # noqa: BLE001
         logger.error("Unexpected error during Gemini analysis: %s", exc)
