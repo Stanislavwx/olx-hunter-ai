@@ -88,15 +88,17 @@ python main.py
 The bot provides a full interactive control panel right inside Telegram:
 
 * 🏠 **Main Dashboard:** Live overview of active tasks, deals found, total scanned, and database records.
+* 🚀 **Full Market Selection («Повний підбір»):** Evaluates all existing listings across all pages on OLX against your AI instructions and sends every good deal directly to Telegram.
+* ⚡ **Live Monitoring («Перевірити нові»):** Continuously monitors Page 1 in background and instantly alerts when a brand new matching listing is published on OLX.
 * 📋 **Task Management:** View all tasks, toggle status (🟢 Active / ⏸ Paused), or delete tasks.
+* 🖼️ **Photo Cards:** Sends listing photos directly in Telegram cards with formatted specifications and OLX button.
 * ✏️ **Live Editing:**
   * **Edit AI Prompt:** Adjust expert instructions for any task directly in chat.
   * **Edit Price Range:** Change min/max budget bounds on the fly (e.g. `6000-15000`).
   * **Edit Search Query:** Update search keywords without touching code.
-* 🔄 **Task Rescan:** Rescans a specific task by clearing its seen cache, immediately re-evaluating active market listings.
+* 🔎 **Task Deep Search («Повний пошук»):** Resets seen history for a specific task and deep-scans all active market listings.
 * ➕ **Add Task Wizard:** Add new search tasks via `/add` or the menu by sending a single line:
   `ThinkPad T14 | thinkpad t14 | 8000 | 16000 | Only complete laptop. Min 16GB RAM. Reject parts.`
-* ⚡ **Immediate Scan:** Force an instant scan across all active tasks with zero delay.
 * 🗑️ **Clear History Cache:** Reset seen listings database from the Settings menu.
 * ⚙️ **Runtime Settings:** Toggle minimum AI confidence threshold (60% / 75% / 90%) and language (UA 🇺🇦 / EN 🇬🇧).
 
@@ -303,16 +305,18 @@ python main.py
 Бот працює як повноцінна панель управління прямо в чаті, замінюючи поточне повідомлення замість спаму:
 
 * 🏠 **Головне меню:** Статус завдань, кількість знайдених угод, перевірених оголошень та записів у базі.
+* 🚀 **Повний підбір (знайти всі наявні):** Сканує абсолютно всі сторінки OLX за вашими завданнями, аналізує всі пропозиції через ШІ та надсилає всі вигідні варіанти в чат.
+* ⚡ **Фоновий моніторинг («Перевірити нові»):** Тихо стежить за ринком у фоновому режимі та надсилає сповіщення негайно, щойно на OLX з'являється нове оголошення.
 * 📋 **Список завдань:** Перегляд деталей кожного пошуку, призупинення (⏸) та активація (🟢), видалення.
+* 🖼️ **Картки з реальними фото:** Бот надсилає картки пропозицій із фотографіями товару, характеристиками, висновком ШІ та прямим посиланням на OLX.
 * ✏️ **Редагування на льоту:**
   * **Змінити промпт:** Надішліть новий текст інструкцій для ШІ безпосередньо у відповідь боту.
   * **Змінити діапазон цін:** Введіть нові межі (наприклад: `7000-14000`).
   * **Змінити пошуковий запит:** Змініть ключові слова пошуку.
-* 🔄 **Пересканувати завдання:** Скидає кеш переглянутих саме для цього завдання і негайно аналізує весь поточний ринок на OLX.
-* ➕ **Майстер створення завдань:** Команда `/add` або кнопка «Додати» — формат в один рядок:
+* 🔎 **Повний пошук (знайти всі):** Скидає пам'ять саме для вибраного завдання і проводить повний підбір усіх наявних варіантів з OLX.
+* ➕ **Майстер створення завдань:** Команда `/add` або кнопка «Додати завдання» — формат в один рядок:
   `ThinkPad T14 | thinkpad t14 | 8000 | 16000 | Тільки цілий ноутбук. Від 16GB RAM. Без запчастин.`
-* ⚡ **Сканувати зараз:** Примусовий миттєвий запуск сканування по всіх активних завданнях.
-* 🗑️ **Очистити історію:** Повне скидання кешу переглянутих у меню налаштувань.
+* 🗑️ **Очистити пам'ять оголошень:** Повне скидання бази переглянутих у меню налаштувань.
 * ⚙️ **Налаштування:** Зміна порогу впевненості ШІ (60% / 75% / 90%) та мови (🇺🇦 / 🇬🇧).
 
 ### Доступні команди бота
