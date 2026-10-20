@@ -139,6 +139,14 @@ async def init_db() -> None:
                     extra_json = json.dumps(extra_keys, ensure_ascii=False)
                     exclude_json = json.dumps(t.get("exclude_keywords", []), ensure_ascii=False)
 
+                    if t_name == "ThinkPad Core Ultra / Ryzen AI Hunter":
+                        async with db.execute("SELECT id FROM tasks WHERE name = 'ThinkPad X1 Carbon Gen 7'") as cur:
+                            old_row = await cur.fetchone()
+                        if old_row:
+                            await db.execute("UPDATE tasks SET name = ? WHERE id = ?", (t_name, old_row["id"]))
+                            await db.execute("DELETE FROM seen_offers WHERE task_id = ?", (old_row["id"],))
+                            logger.info("Migrated task #%d to '%s' and cleared old seen offers.", old_row["id"], t_name)
+
                     async with db.execute("SELECT id FROM tasks WHERE name = ?", (t_name,)) as cur:
                         existing = await cur.fetchone()
 
@@ -353,6 +361,14 @@ async def update_task_query(task_id: int, new_query: str) -> bool:
         await db.execute("UPDATE tasks SET query = ? WHERE id = ?", (new_query, task_id))
         await db.commit()
         return True
+
+
+async def is_task_active(task_id: int) -> bool:
+    """Check if a task is currently active (not paused)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT is_active FROM tasks WHERE id = ?", (task_id,)) as cur:
+            row = await cur.fetchone()
+            return bool(row[0]) if row else False
 
 
 async def toggle_task(task_id: int) -> bool:

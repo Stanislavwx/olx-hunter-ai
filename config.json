@@ -54,14 +54,14 @@
       "ai_prompt": "Act as a PC flipping expert evaluating a used desktop PC for profitable resale potential.\n\nКРИТИЧНІ ПРАВИЛА:\n1. ЦІЛЬ — ТІЛЬКИ ПОВНОЦІННИЙ СИСТЕМНИЙ БЛОК (ПК у зборі)! Якщо це ключ активації Windows, ліцензія, окремий корпус, блок живлення, одна відеокарта або послуга налаштування — ВІДХИЛЯТИ НЕГАЙНО (is_good_deal = false, confidence = 0)!\n2. Платформа: AMD AM4 (Ryzen) або Intel LGA1151v2 / LGA1200 (8-10 покоління). Мінімум DDR4 RAM.\n3. Перевіряй наявність стандартної материнської плати ATX/mATX та БЖ від 400W.\n4. Відхиляй DDR2/DDR3, LGA1155, LGA775, AMD FX, китайські плати з серверними Xeon (Huananzhi) та ультратонкі офісні неттопи з пропрієтарними блоками.\n5. Оціни маржинальність: якщо додати бюджетну відеокарту, чи вийде перепродати як ігровий ПК за 8000+ грн?"
     },
     {
-      "name": "ThinkPad X1 Carbon Gen 7",
-      "poll_interval_seconds": 420,
+      "name": "ThinkPad Core Ultra / Ryzen AI Hunter",
+      "poll_interval_seconds": 360,
       "max_pages": 3,
       "olx_params": {
         "category_id": "80",
-        "query": "thinkpad x1 carbon gen 7",
-        "filter_float_price:from": "5000",
-        "filter_float_price:to": "18000",
+        "query": "thinkpad",
+        "filter_float_price:from": "20000",
+        "filter_float_price:to": "55000",
         "currency": "UAH"
       },
       "exclude_keywords": [
@@ -78,9 +78,27 @@
         "корпус",
         "кришка",
         "петлі",
-        "куплю"
+        "куплю",
+        "обмін",
+        "i5-8",
+        "i7-8",
+        "i5-10",
+        "i7-10",
+        "i5-11",
+        "i7-11",
+        "i5-12",
+        "i7-12",
+        "t480",
+        "t490",
+        "t470",
+        "t460",
+        "x280",
+        "x270",
+        "x260",
+        "t440",
+        "t430"
       ],
-      "ai_prompt": "Act as an IT hardware buyer assessing a used ThinkPad X1 Carbon Gen 7 laptop.\n\nКРИТИЧНО ВАЖЛИВЕ ГОЛОВНЕ ПРАВИЛО:\nЦІЛЬ — ТІЛЬКИ ПОВНОЦІННИЙ РОБОЧИЙ НОУТБУК У ЗБОРІ! Якщо це окрема запчастина чи аксесуар (акумулятор, батарея, клавіатура, екран/матриця, материнська плата, блок живлення/зарядка, чохол, кулер або корпус) — НЕГАЙНО ВІДХИЛЯТИ (is_good_deal = false, confidence = 0)! Ніколи не схвалювати запчастини!\n\nКритерії оцінки ноутбука:\n1. Фізичний стан за фото: цілісність корпусу, петель, стан клавіатури та екрану (без плям та засвітів).\n2. Характеристики: процесор Intel Core i5/i7 8-го покоління, оперативна пам'ять 16GB (8GB відхиляти або тільки при дуже низькій ціні), NVMe SSD.\n3. Батарея: знос до 25-30%.\n4. Червоні прапорці: пароль BIOS/supervisor, блокування, залиття рідиною — відхиляти одразу.\n5. Ціна: для доброго стану нормальна ціна 9 000 - 13 000 грн. Визначай вигідні варіанти дешевше ринку."
+      "ai_prompt": "Act as a premium laptop hardware evaluator assessing a used Lenovo ThinkPad for top-tier value for money (ТОП ЗА СВОЇ ГРОШІ).\n\nКРИТИЧНІ ПРАВИЛА:\n1. ЦІЛЬ — ТІЛЬКИ ПОВНОЦІННИЙ РОБОЧИЙ НОУТБУК LENOVO THINKPAD У ЗБОРІ! Якщо це окрема запчастина чи аксесуар (матриця, екран, клавіатура, батарея, блок живлення, чохол, кулер, корпус) — НЕГАЙНО ВІДХИЛЯТИ (is_good_deal = false, confidence = 0)!\n\n2. ПРОЦЕСОР (ГОЛОВНА ВИМОГА — СУЧАСНИЙ ЧІП З AI): Ноутбук обов'язково повинен мати один з таких процесорів:\n   - INTEL CORE ULTRA (Series 1 або 2): Core Ultra 5 (125U/H, 135U/H, 226V, 235U), Core Ultra 7 (155U/H, 165U/H, 256V), Core Ultra 9.\n   - AMD RYZEN З AI (NPU): серії Ryzen 7040 / 8040 Phoenix/Hawk Point (Ryzen 7 7840U/HS, Ryzen 7 Pro 8840U/HS, Ryzen 5 Pro 7540U/8540U) або Ryzen AI 300 Strix Point (Ryzen AI 7 Pro 360, Ryzen AI 9 365/HX 370).\n   ВІДХИЛЯТИ: будь-які старі Intel Core i3/i5/i7 (8-13 поколінь i-серії!) та старі AMD Ryzen без NPU (3000-6000 серій).\n\n3. ОЦІНКА «ТОП ЗА СВОЇ ГРОШІ» (ВИГОДА):\n   - ThinkPad T14 / T14s Gen 5 або L14/L16 Gen 1 на Core Ultra чи Ryzen 7 7840/8840 за ціною 22 000 – 34 000 грн — це МАКСИМАЛЬНИЙ ТОП ЗА СВОЇ ГРОШІ (is_good_deal = true, confidence 95-100%).\n   - ThinkPad X1 Carbon Gen 12 або P14s Gen 5 на Core Ultra за ціною до 45 000 – 50 000 грн — СУПЕР УГОДА.\n   - Пам'ять: мінімум 16GB, велика перевага за 32GB DDR5/LPDDR5x.\n\n4. ЧЕРВОНІ ПРАПОРЦІ (ВІДХИЛЯТИ НЕГАЙНО): пароль на BIOS / Supervisor password, активний Computrace / Absolute, блокування MDM / AutoPilot, знос батареї >25%, сліди залиття чи тріщини."
     }
   ]
 }

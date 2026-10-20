@@ -25,6 +25,7 @@ from database import (
     get_active_tasks,
     init_db,
     is_offer_seen,
+    is_task_active,
     mark_offer_seen,
     record_scanned,
 )
@@ -177,6 +178,11 @@ async def scan_task(
     task_max_pages = int(task.get("max_pages", 3))
     max_pages = max(task_max_pages, 5) if deep_scan else task_max_pages
 
+    # Check if task is active; abort immediately if paused
+    if not await is_task_active(task_id):
+        logger.info("Task '%s' (ID %d) is paused (is_active=0) — skipping scan.", task_name, task_id)
+        return 0, 0
+
     params: dict[str, Any] = {
         "query": task.get("query", ""),
         "currency": "UAH",
@@ -209,6 +215,10 @@ async def scan_task(
     deals_count = 0
 
     for page in range(max_pages):
+        if not await is_task_active(task_id):
+            logger.info("Task '%s' was paused during scan — aborting remaining pages.", task_name)
+            break
+
         page_params = dict(params)
         page_params["offset"] = page * 40
 
@@ -220,6 +230,10 @@ async def scan_task(
 
         new_on_this_page = 0
         for offer in offers:
+            if not await is_task_active(task_id):
+                logger.info("Task '%s' was paused — stopping offer processing immediately.", task_name)
+                break
+
             offer_id = str(offer.get("id", ""))
             if not offer_id:
                 continue
@@ -300,6 +314,9 @@ async def run_scanner_loop() -> None:
                 async with _build_http_client() as client:
                     for idx, task in enumerate(tasks):
                         t_id = task["id"]
+                        if not await is_task_active(t_id):
+                            continue
+
                         poll_interval = int(task.get("poll_interval", 300))
                         last_time = last_scan_times.get(t_id, 0.0)
 

@@ -629,6 +629,9 @@ async def handle_callback_query(cb: dict[str, Any]) -> None:
     elif data.startswith("task_rescan_"):
         t_id = int(data.replace("task_rescan_", ""))
         task = await get_task_by_id(t_id)
+        if task and not task.get("is_active"):
+            await toggle_task(t_id)
+            task = await get_task_by_id(t_id)
         t_name = task["name"] if task else f"ID {t_id}"
         cleared = await clear_seen_offers_for_task(t_id)
         task_rescan_queue.add(t_id)
@@ -701,7 +704,15 @@ async def handle_callback_query(cb: dict[str, Any]) -> None:
 
     elif data.startswith("task_toggle_"):
         t_id = int(data.replace("task_toggle_", ""))
-        await toggle_task(t_id)
+        new_status = await toggle_task(t_id)
+        if not new_status:
+            task_rescan_queue.discard(t_id)
+        status_msg = "▶️ Завдання відновлено!" if new_status else "⏸ Завдання призупинено!"
+        await _api_call("answerCallbackQuery", {
+            "callback_query_id": cb_id,
+            "text": status_msg,
+            "show_alert": False,
+        })
         await show_task_detail(chat_id, t_id, message_id=msg_id)
 
     elif data.startswith("task_delete_"):
