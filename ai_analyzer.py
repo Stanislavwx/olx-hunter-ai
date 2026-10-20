@@ -140,6 +140,14 @@ async def analyze_offer(
                     )
                     await asyncio.sleep(backoff)
                     backoff *= 2.0
+                elif ("404" in err_msg or "NOT_FOUND" in err_msg) and model_name != "gemini-3.1-flash-lite-preview":
+                    logger.warning(
+                        "Model '%s' not found (404). Automatically falling back to 'gemini-3.1-flash-lite-preview' …",
+                        model_name,
+                    )
+                    model_name = "gemini-3.1-flash-lite-preview"
+                    os.environ["GEMINI_MODEL_NAME"] = "gemini-3.1-flash-lite-preview"
+                    continue
                 else:
                     raise
 
