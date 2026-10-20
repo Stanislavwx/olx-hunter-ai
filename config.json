@@ -31,7 +31,7 @@
       "poll_interval_seconds": 420,
       "max_pages": 3,
       "olx_params": {
-        "category_id": "3770",
+        "category_id": "80",
         "query": "thinkpad x1 carbon gen 7",
         "filter_float_price:from": "5000",
         "filter_float_price:to": "18000",

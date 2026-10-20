@@ -10,8 +10,10 @@ services:
     # Restart policy: always bring back up unless explicitly stopped
     restart: unless-stopped
 
-    # Use host network mode to match host network stack (prevents WAF/NAT drops)
-    network_mode: "host"
+    # Reliable DNS resolvers (prevents local systemd-resolved/Tailscale DNS flapping)
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
 
     # Load secrets from .env file (never bake these into the image)
     env_file:

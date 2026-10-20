@@ -27,16 +27,43 @@ async def init_db() -> None:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
 
-        # 1. Seen offers table
+        # 1. Seen offers table (per-task deduplication)
         await db.execute(
             """
             CREATE TABLE IF NOT EXISTS seen_offers (
-                offer_id    TEXT PRIMARY KEY,
+                offer_id    TEXT NOT NULL,
+                task_id     INTEGER NOT NULL DEFAULT 0,
                 task_name   TEXT NOT NULL,
-                seen_at     DATETIME DEFAULT CURRENT_TIMESTAMP
+                seen_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (offer_id, task_id)
             )
             """
         )
+
+        # Migration check: ensure task_id column exists
+        async with db.execute("PRAGMA table_info(seen_offers)") as cur:
+            columns = [row["name"] for row in await cur.fetchall()]
+        if "task_id" not in columns:
+            await db.execute("DROP TABLE IF EXISTS seen_offers_backup")
+            await db.execute("ALTER TABLE seen_offers RENAME TO seen_offers_backup")
+            await db.execute(
+                """
+                CREATE TABLE seen_offers (
+                    offer_id    TEXT NOT NULL,
+                    task_id     INTEGER NOT NULL DEFAULT 0,
+                    task_name   TEXT NOT NULL,
+                    seen_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (offer_id, task_id)
+                )
+                """
+            )
+            await db.execute(
+                """
+                INSERT OR IGNORE INTO seen_offers (offer_id, task_id, task_name, seen_at)
+                SELECT offer_id, 0, task_name, seen_at FROM seen_offers_backup
+                """
+            )
+            await db.execute("DROP TABLE IF EXISTS seen_offers_backup")
 
         # 2. Dynamic tasks table
         await db.execute(
@@ -136,26 +163,55 @@ async def init_db() -> None:
     logger.info("Database initialised at %s", DB_PATH)
 
 
-# ── Offer Deduplication ───────────────────────────────────────────────────────
+# ── Offer Deduplication & History Management ──────────────────────────────────
 
-async def is_offer_seen(offer_id: str) -> bool:
-    """Return True if this offer_id has already been processed."""
+async def is_offer_seen(offer_id: str, task_id: int = 0) -> bool:
+    """Return True if this offer_id has already been processed for this specific task."""
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
-            "SELECT 1 FROM seen_offers WHERE offer_id = ?", (offer_id,)
+            "SELECT 1 FROM seen_offers WHERE offer_id = ? AND (task_id = ? OR task_id = 0)",
+            (offer_id, task_id),
         ) as cursor:
             row = await cursor.fetchone()
             return row is not None
 
 
-async def mark_offer_seen(offer_id: str, task_name: str) -> None:
-    """Persist an offer_id so it is never alerted on again."""
+async def mark_offer_seen(offer_id: str, task_id: int, task_name: str) -> None:
+    """Persist an offer_id so it is never alerted on again for this task."""
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
-            "INSERT OR IGNORE INTO seen_offers (offer_id, task_name) VALUES (?, ?)",
-            (offer_id, task_name),
+            "INSERT OR IGNORE INTO seen_offers (offer_id, task_id, task_name) VALUES (?, ?, ?)",
+            (offer_id, task_id, task_name),
         )
         await db.commit()
+
+
+async def clear_seen_offers_for_task(task_id: int) -> int:
+    """Clear seen offers for a specific task. Returns number of deleted records."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute("DELETE FROM seen_offers WHERE task_id = ?", (task_id,))
+        await db.commit()
+        return cursor.rowcount
+
+
+async def clear_all_seen_offers() -> int:
+    """Clear all seen offers across all tasks. Returns number of deleted records."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute("DELETE FROM seen_offers")
+        await db.commit()
+        return cursor.rowcount
+
+
+async def get_seen_offers_count(task_id: int | None = None) -> int:
+    """Return total count of recorded offers."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        if task_id is not None:
+            async with db.execute("SELECT COUNT(*) FROM seen_offers WHERE task_id = ?", (task_id,)) as cur:
+                row = await cur.fetchone()
+                return int(row[0]) if row else 0
+        async with db.execute("SELECT COUNT(*) FROM seen_offers") as cur:
+            row = await cur.fetchone()
+            return int(row[0]) if row else 0
 
 
 # ── Task CRUD & Live Editing ──────────────────────────────────────────────────

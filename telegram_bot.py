@@ -20,8 +20,11 @@ import httpx
 
 from database import (
     add_task,
+    clear_all_seen_offers,
+    clear_seen_offers_for_task,
     delete_task,
     get_all_tasks,
+    get_seen_offers_count,
     get_setting,
     get_stats,
     get_task_by_id,
@@ -81,9 +84,15 @@ async def _api_call(method: str, payload: dict[str, Any]) -> dict[str, Any]:
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(url, json=payload)
-            return resp.json()
+            data = resp.json()
+            if not data.get("ok"):
+                desc = str(data.get("description", ""))
+                # Telegram returns 400 'message is not modified' when user clicks button resulting in identical state
+                if "message is not modified" not in desc:
+                    logger.warning("Telegram API call '%s' returned error: %s", method, desc)
+            return data
     except Exception as exc:  # noqa: BLE001
-        logger.error("Telegram API error (%s): %s", method, exc)
+        logger.error("Telegram API network error (%s): %s", method, exc)
         return {}
 
 
@@ -201,13 +210,15 @@ async def show_main_menu(chat_id: int, message_id: int | None = None) -> None:
     active_cnt = sum(1 for t in tasks if t.get("is_active"))
     min_conf = await get_setting("min_confidence", "70")
     lang = await get_setting("language", "ua")
+    seen_cnt = await get_seen_offers_count()
 
     text = (
         "🤖 <b>OLX Hunter AI — Панель керування</b>\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
         f"🟢 <b>Активних завдань:</b> {active_cnt} з {len(tasks)}\n"
-        f"🔥 <b>Знайдено угод:</b> {stats.get('deals_found', 0)}\n"
-        f"🔍 <b>Проскановано лістингів:</b> {stats.get('scanned_total', 0)}\n"
+        f"🔥 <b>Знайдено вигідних угод:</b> {stats.get('deals_found', 0)}\n"
+        f"🔍 <b>Проскановано оголошень:</b> {stats.get('scanned_total', 0)}\n"
+        f"🗄 <b>В базі переглянутих:</b> {seen_cnt} шт\n"
         f"⚙️ <b>Поріг ШІ:</b> {min_conf}% | <b>Мова:</b> {'Українська 🇺🇦' if lang == 'ua' else 'English 🇬🇧'}\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
         "Оберіть потрібний розділ:"
@@ -276,6 +287,8 @@ async def show_task_detail(chat_id: int, task_id: int, message_id: int | None = 
         await show_tasks_menu(chat_id, message_id)
         return
 
+    task_seen = await get_seen_offers_count(task_id)
+
     status_str = "🟢 Працює (активне)" if task["is_active"] else "⏸ На паузі (призупинено)"
     toggle_label = "⏸ Призупинити" if task["is_active"] else "▶️ Запустити"
 
@@ -291,6 +304,7 @@ async def show_task_detail(chat_id: int, task_id: int, message_id: int | None = 
         f"💰 <b>Ціна:</b> {price_str}\n"
         f"⏱ <b>Інтервал:</b> {task['poll_interval']} сек\n"
         f"📊 <b>Статус:</b> <b>{status_str}</b>\n"
+        f"🗄 <b>В базі для цього завдання:</b> {task_seen} оголошень\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"🧠 <b>Промпт для ШІ Gemini:</b>\n"
         f"<i>{task['ai_prompt']}</i>\n"
@@ -302,7 +316,7 @@ async def show_task_detail(chat_id: int, task_id: int, message_id: int | None = 
         "inline_keyboard": [
             [
                 {"text": toggle_label, "callback_data": f"task_toggle_{task_id}"},
-                {"text": "🗑 Видалити", "callback_data": f"task_delete_{task_id}"},
+                {"text": "🔄 Пересканувати", "callback_data": f"task_rescan_{task_id}"},
             ],
             [
                 {"text": "✏️ Змінити промпт", "callback_data": f"task_edit_prompt_{task_id}"},
@@ -310,6 +324,7 @@ async def show_task_detail(chat_id: int, task_id: int, message_id: int | None = 
             ],
             [
                 {"text": "🔍 Змінити пошуковий запит", "callback_data": f"task_edit_query_{task_id}"},
+                {"text": "🗑 Видалити", "callback_data": f"task_delete_{task_id}"},
             ],
             [
                 {"text": "🔙 До списку завдань", "callback_data": "menu_tasks"},
@@ -324,6 +339,7 @@ async def show_settings_menu(chat_id: int, message_id: int | None = None) -> Non
     """Settings menu in single editable message."""
     min_conf = await get_setting("min_confidence", "70")
     lang = await get_setting("language", "ua")
+    seen_cnt = await get_seen_offers_count()
 
     text = (
         "⚙️ <b>Налаштування системи OLX Hunter AI</b>\n"
@@ -331,6 +347,7 @@ async def show_settings_menu(chat_id: int, message_id: int | None = None) -> Non
         f"🎯 <b>Мінімальна впевненість ШІ:</b> {min_conf}%\n"
         f"<i>(Сповіщення надсилатимуться тільки коли оцінка ШІ ≥ {min_conf}%)</i>\n\n"
         f"🌐 <b>Мова сповіщень та аналізу:</b> {'Українська 🇺🇦' if lang == 'ua' else 'English 🇬🇧'}\n"
+        f"🗄 <b>Всього оголошень у базі:</b> {seen_cnt} шт\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
         "Натисніть кнопку, щоб змінити налаштування:"
     )
@@ -344,6 +361,9 @@ async def show_settings_menu(chat_id: int, message_id: int | None = None) -> Non
             [
                 {"text": f"{'✅ ' if lang == 'ua' else ''}🇺🇦 Українська", "callback_data": "set_lang_ua"},
                 {"text": f"{'✅ ' if lang == 'en' else ''}🇬🇧 English", "callback_data": "set_lang_en"},
+            ],
+            [
+                {"text": "🗑 Очистити історію переглянутих", "callback_data": "menu_clear_cache"},
             ],
             [
                 {"text": "🔙 Головне меню", "callback_data": "menu_main"},
@@ -526,8 +546,32 @@ async def handle_callback_query(cb: dict[str, Any]) -> None:
     chat_id = message.get("chat", {}).get("id")
     msg_id = message.get("message_id")
 
-    # Acknowledge button click in Telegram UI
-    await _api_call("answerCallbackQuery", {"callback_query_id": cb_id})
+    # Acknowledge button click with contextual feedback
+    if data == "menu_scan":
+        scan_requested_event.set()
+        await _api_call("answerCallbackQuery", {
+            "callback_query_id": cb_id,
+            "text": "⚡ Сканування всіх завдань запущено!",
+            "show_alert": False,
+        })
+    elif data.startswith("task_rescan_"):
+        t_id = int(data.replace("task_rescan_", ""))
+        cleared = await clear_seen_offers_for_task(t_id)
+        scan_requested_event.set()
+        await _api_call("answerCallbackQuery", {
+            "callback_query_id": cb_id,
+            "text": f"🔄 Скинуто {cleared} оголошень. Запущено пересканування!",
+            "show_alert": False,
+        })
+    elif data == "menu_clear_cache":
+        cleared = await clear_all_seen_offers()
+        await _api_call("answerCallbackQuery", {
+            "callback_query_id": cb_id,
+            "text": f"🗑️ Очищено {cleared} оголошень з бази!\nНаступне сканування перевірить всі оголошення заново.",
+            "show_alert": True,
+        })
+    else:
+        await _api_call("answerCallbackQuery", {"callback_query_id": cb_id})
 
     if not chat_id:
         return
@@ -546,17 +590,15 @@ async def handle_callback_query(cb: dict[str, Any]) -> None:
     elif data == "menu_stats":
         await show_stats_screen(chat_id, message_id=msg_id)
 
-    elif data == "menu_settings":
+    elif data == "menu_settings" or data == "menu_clear_cache":
         await show_settings_menu(chat_id, message_id=msg_id)
 
     elif data == "menu_scan":
-        scan_requested_event.set()
-        await _api_call("answerCallbackQuery", {
-            "callback_query_id": cb_id,
-            "text": "⚡ Сканування запущено!",
-            "show_alert": False,
-        })
         await show_main_menu(chat_id, message_id=msg_id)
+
+    elif data.startswith("task_rescan_"):
+        t_id = int(data.replace("task_rescan_", ""))
+        await show_task_detail(chat_id, t_id, message_id=msg_id)
 
     elif data == "menu_add":
         _user_fsm[chat_id] = {"state": "add_task", "message_id": msg_id}
@@ -689,5 +731,10 @@ async def start_telegram_polling() -> None:
             logger.info("Telegram polling loop cancelled.")
             break
         except Exception as exc:  # noqa: BLE001
-            logger.error("Error in Telegram polling: %s", exc)
-            await asyncio.sleep(3)
+            err_str = str(exc)
+            if "name resolution" in err_str or "gaierror" in err_str or "ConnectError" in type(exc).__name__:
+                logger.warning("DNS/network resolution temporary issue in Telegram polling: %s. Retrying in 10s...", exc)
+                await asyncio.sleep(10)
+            else:
+                logger.error("Error in Telegram polling: %s", exc)
+                await asyncio.sleep(3)

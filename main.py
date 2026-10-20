@@ -60,21 +60,22 @@ async def process_offer(
 ) -> None:
     """
     Run the full pipeline for a single offer:
-      1. Deduplicate via SQLite.
+      1. Deduplicate per-task via SQLite.
       2. Download images.
       3. Send to Gemini for analysis.
       4. Alert via Telegram if it's a good deal.
       5. Persist the offer_id regardless of outcome.
     """
     offer_id = str(offer.get("id", ""))
+    task_id = int(task.get("id", 0))
     task_name: str = task.get("name", "unknown")
 
     if not offer_id:
         return
 
-    # Step 1 — Deduplication check
-    if await is_offer_seen(offer_id):
-        logger.debug("Offer %s already seen — skipping", offer_id)
+    # Step 1 — Per-task deduplication check
+    if await is_offer_seen(offer_id, task_id):
+        logger.debug("Offer %s already seen for task '%s' — skipping", offer_id, task_name)
         return
 
     await record_scanned(1)
@@ -83,7 +84,7 @@ async def process_offer(
     try:
         # Step 2 — Image download
         image_urls = extract_image_urls(offer)
-        image_bytes_list = await download_images(client, image_urls, max_images=4)
+        image_bytes_list = await download_images(client, image_urls, max_images=3)
 
         # Step 3 — Gemini AI analysis
         ai_prompt: str = task.get("ai_prompt", "Evaluate this listing.")
@@ -93,7 +94,8 @@ async def process_offer(
             logger.warning("AI analysis returned None for offer %s", offer_id)
         elif analysis.get("is_good_deal"):
             # Step 4 — Telegram alert
-            logger.info("🔥 GOOD DEAL DETECTED for offer %s (confidence: %d%%)", offer_id, analysis.get("confidence", 0))
+            logger.info("🔥 GOOD DEAL DETECTED for offer %s: '%s' (confidence: %d%%)",
+                        offer_id, offer.get("title", "")[:50], analysis.get("confidence", 0))
             await send_alert(offer, analysis, task_name)
         else:
             logger.info(
@@ -107,20 +109,21 @@ async def process_offer(
         logger.error("Unhandled error processing offer %s: %s", offer_id, exc)
 
     finally:
-        # Step 5 — Always mark as seen
-        await mark_offer_seen(offer_id, task_name)
+        # Step 5 — Always mark as seen for this specific task
+        await mark_offer_seen(offer_id, task_id, task_name)
 
 
 # ── Per-Task Scan Routine ─────────────────────────────────────────────────────
 
-async def scan_task(client: AsyncSession, task: dict[str, Any], max_pages: int = 3) -> None:
+async def scan_task(client: AsyncSession, task: dict[str, Any], max_pages: int = 2) -> None:
     """
     Execute an incremental scan cycle for one active task.
 
     Fetches listings sorted strictly from newest to oldest (`created_at:desc`).
-    Early-exits as soon as already-processed offers are encountered, ensuring
-    maximum speed and zero redundant requests.
+    Inspects all offers on each page, ensuring sponsored top ads never mask
+    fresh organic listings.
     """
+    task_id = int(task.get("id", 0))
     task_name = task.get("name", "unnamed")
     params: dict[str, Any] = {
         "query": task.get("query", ""),
@@ -128,7 +131,7 @@ async def scan_task(client: AsyncSession, task: dict[str, Any], max_pages: int =
         "sort_by": "created_at:desc",
         "limit": 40,
     }
-    cat_id = str(task.get("category_id", "0"))
+    cat_id = str(task.get("category_id", "0")).strip()
     if cat_id and cat_id != "0":
         params["category_id"] = cat_id
 
@@ -137,12 +140,10 @@ async def scan_task(client: AsyncSession, task: dict[str, Any], max_pages: int =
     if task.get("price_to"):
         params["filter_float_price:to"] = str(task["price_to"])
 
-    logger.info("→ Scanning task '%s' (query: '%s', price: %s-%s грн)",
-                task_name, params["query"], task.get("price_from", 0), task.get("price_to", 0))
+    logger.info("→ Scanning task '%s' (query: '%s', cat: %s, price: %s-%s грн)",
+                task_name, params["query"], cat_id or "all", task.get("price_from", 0), task.get("price_to", 0))
 
     new_offers_count = 0
-    consecutive_seen = 0
-    EARLY_STOP_THRESHOLD = 8  # stop paging if 8 consecutive offers were already seen
 
     for page in range(max_pages):
         page_params = dict(params)
@@ -152,28 +153,25 @@ async def scan_task(client: AsyncSession, task: dict[str, Any], max_pages: int =
         if not offers:
             break
 
-        logger.debug("Task '%s' page %d: fetched %d offers", task_name, page + 1, len(offers))
+        logger.info("Task '%s' page %d: inspecting %d offers", task_name, page + 1, len(offers))
 
+        new_on_this_page = 0
         for offer in offers:
             offer_id = str(offer.get("id", ""))
             if not offer_id:
                 continue
 
-            if await is_offer_seen(offer_id):
-                consecutive_seen += 1
-                if consecutive_seen >= EARLY_STOP_THRESHOLD:
-                    logger.debug(
-                        "Task '%s': reached %d seen offers in a row — all older listings already indexed.",
-                        task_name, consecutive_seen
-                    )
-                    break
-            else:
-                consecutive_seen = 0
-                new_offers_count += 1
-                await process_offer(client, offer, task)
+            if await is_offer_seen(offer_id, task_id):
+                continue
 
-        # If we hit the boundary of already seen offers on this page, stop paging
-        if consecutive_seen >= EARLY_STOP_THRESHOLD:
+            new_on_this_page += 1
+            new_offers_count += 1
+            await process_offer(client, offer, task)
+
+        # If zero new offers were found across the entire page,
+        # all recent and older listings are already indexed. Stop pagination.
+        if new_on_this_page == 0:
+            logger.info("Task '%s': all %d offers on page %d already seen — scan up to date.", task_name, len(offers), page + 1)
             break
 
         if page < max_pages - 1:
@@ -189,7 +187,7 @@ async def run_scanner_loop() -> None:
     Main background scheduler loop.
 
     Polls active tasks dynamically from SQLite database and listens
-    for manual 'Scan Now' events from Telegram.
+    for manual 'Scan Now' events from Telegram with zero-latency wakeup.
     """
     logger.info("OLX Hunter background scanner started.")
     last_scan_times: dict[int, float] = {}
@@ -202,34 +200,38 @@ async def run_scanner_loop() -> None:
 
             if force_scan:
                 scan_requested_event.clear()
-                logger.info("⚡ Immediate scan requested from Telegram!")
+                logger.info("⚡ Immediate scan requested from Telegram! Active tasks: %d", len(tasks))
 
-            async with _build_http_client() as client:
-                for idx, task in enumerate(tasks):
-                    t_id = task["id"]
-                    poll_interval = int(task.get("poll_interval", 300))
-                    last_time = last_scan_times.get(t_id, 0.0)
+            if tasks:
+                async with _build_http_client() as client:
+                    for idx, task in enumerate(tasks):
+                        t_id = task["id"]
+                        poll_interval = int(task.get("poll_interval", 300))
+                        last_time = last_scan_times.get(t_id, 0.0)
 
-                    # Scan if due or if manual scan was triggered
-                    if force_scan or (loop_now - last_time >= poll_interval):
-                        try:
-                            # Stagger between tasks by 3s to be polite
-                            if idx > 0:
-                                await asyncio.sleep(3)
-                            await scan_task(client, task)
-                            last_scan_times[t_id] = asyncio.get_event_loop().time()
-                        except Exception as exc:  # noqa: BLE001
-                            logger.error("Scan failed for task '%s': %s", task.get("name"), exc)
+                        # Scan if due or if manual scan was triggered
+                        if force_scan or (loop_now - last_time >= poll_interval):
+                            try:
+                                # Stagger between tasks by 2s to be polite
+                                if idx > 0:
+                                    await asyncio.sleep(2)
+                                await scan_task(client, task)
+                                last_scan_times[t_id] = asyncio.get_event_loop().time()
+                            except Exception as exc:  # noqa: BLE001
+                                logger.error("Scan failed for task '%s': %s", task.get("name"), exc)
 
-            # Sleep short duration to stay responsive to Telegram triggers and timers
-            await asyncio.sleep(10)
+            # Responsive wait: sleep up to 10s or wake instantly on scan trigger
+            try:
+                await asyncio.wait_for(scan_requested_event.wait(), timeout=10.0)
+            except asyncio.TimeoutError:
+                pass
 
         except asyncio.CancelledError:
             logger.info("Scanner loop cancelled.")
             break
         except Exception as exc:  # noqa: BLE001
             logger.error("Scheduler error: %s", exc)
-            await asyncio.sleep(15)
+            await asyncio.sleep(10)
 
 
 # ── Main Entry Point ──────────────────────────────────────────────────────────
