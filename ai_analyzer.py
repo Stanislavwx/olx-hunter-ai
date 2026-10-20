@@ -22,6 +22,9 @@ from google.genai import types
 
 logger = logging.getLogger(__name__)
 
+# Suppress verbose internal SDK logs (e.g. AFC notifications)
+logging.getLogger("google_genai.models").setLevel(logging.WARNING)
+
 # JSON schema enforced via GenerateContentConfig
 RESPONSE_SCHEMA = {
     "type": "OBJECT",
@@ -134,19 +137,27 @@ async def analyze_offer(
             except Exception as exc:
                 err_msg = str(exc)
                 if ("503" in err_msg or "429" in err_msg or "UNAVAILABLE" in err_msg) and attempt < max_retries:
+                    if "503" in err_msg and attempt >= 2 and model_name != "gemini-3.8-flash":
+                        logger.warning(
+                            "Model '%s' experiencing high demand (503). Switching to 'gemini-3.8-flash' …",
+                            model_name,
+                        )
+                        model_name = "gemini-3.8-flash"
+                        os.environ["GEMINI_MODEL_NAME"] = "gemini-3.8-flash"
+                        continue
                     logger.warning(
                         "Gemini API transient error (%s). Retrying attempt %d/%d in %.1fs …",
                         err_msg[:100], attempt, max_retries, backoff
                     )
                     await asyncio.sleep(backoff)
                     backoff *= 2.0
-                elif ("404" in err_msg or "NOT_FOUND" in err_msg) and model_name != "gemini-3.1-flash-lite-preview":
+                elif ("404" in err_msg or "NOT_FOUND" in err_msg) and model_name != "gemini-3.1-flash-lite":
                     logger.warning(
-                        "Model '%s' not found (404). Automatically falling back to 'gemini-3.1-flash-lite-preview' …",
+                        "Model '%s' not found (404). Automatically falling back to 'gemini-3.1-flash-lite' …",
                         model_name,
                     )
-                    model_name = "gemini-3.1-flash-lite-preview"
-                    os.environ["GEMINI_MODEL_NAME"] = "gemini-3.1-flash-lite-preview"
+                    model_name = "gemini-3.1-flash-lite"
+                    os.environ["GEMINI_MODEL_NAME"] = "gemini-3.1-flash-lite"
                     continue
                 else:
                     raise

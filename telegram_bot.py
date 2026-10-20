@@ -778,7 +778,7 @@ async def start_telegram_polling() -> None:
             url = TELEGRAM_API.format(token=token, method="getUpdates")
             payload = {"offset": offset, "timeout": 20}
 
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient(timeout=45.0) as client:
                 resp = await client.post(url, json=payload)
                 if resp.status_code != 200:
                     await asyncio.sleep(3)
@@ -796,11 +796,15 @@ async def start_telegram_polling() -> None:
         except asyncio.CancelledError:
             logger.info("Telegram polling loop cancelled.")
             break
+        except httpx.TimeoutException:
+            # Idle long-polling socket timeout when no messages arrive — standard Telegram polling cycle
+            continue
         except Exception as exc:  # noqa: BLE001
             err_str = str(exc)
-            if "name resolution" in err_str or "gaierror" in err_str or "ConnectError" in type(exc).__name__:
+            err_type = type(exc).__name__
+            if "name resolution" in err_str or "gaierror" in err_str or "ConnectError" in err_type:
                 logger.warning("DNS/network resolution temporary issue in Telegram polling: %s. Retrying in 10s...", exc)
                 await asyncio.sleep(10)
             else:
-                logger.error("Error in Telegram polling: %s", exc)
+                logger.error("Error in Telegram polling (%s): %s", err_type, exc or "No details")
                 await asyncio.sleep(3)

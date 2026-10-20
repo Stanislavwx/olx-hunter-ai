@@ -94,7 +94,8 @@ async def process_offer(
     try:
         # Step 2 — Image download
         image_urls = extract_image_urls(offer)
-        image_bytes_list = await download_images(client, image_urls, max_images=3)
+        max_imgs = int(os.environ.get("MAX_OFFER_IMAGES", 8))
+        image_bytes_list = await download_images(client, image_urls, max_images=max_imgs)
 
         # Step 3 — Gemini AI analysis
         ai_prompt: str = task.get("ai_prompt", "Evaluate this listing.")

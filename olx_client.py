@@ -102,7 +102,7 @@ async def fetch_offers(
 async def download_images(
     client: AsyncSession,
     image_urls: list[str],
-    max_images: int = 4,
+    max_images: int = 8,
 ) -> list[bytes]:
     """
     Download up to *max_images* images, skipping broken links gracefully.
