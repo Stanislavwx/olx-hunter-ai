@@ -5,7 +5,7 @@
       "poll_interval_seconds": 300,
       "max_pages": 3,
       "olx_params": {
-        "category_id": "89",
+        "category_id": "78",
         "query": "nvme",
         "filter_float_price:from": "1000",
         "filter_float_price:to": "4000",
@@ -31,7 +31,7 @@
       "poll_interval_seconds": 420,
       "max_pages": 2,
       "olx_params": {
-        "category_id": "43",
+        "category_id": "3770",
         "query": "thinkpad x1 carbon gen 7"
       },
       "ai_prompt": "Act as an IT hardware buyer assessing a used ThinkPad X1 Carbon Gen 7 (2019 model) for purchase. Evaluate:\n1. PHYSICAL CONDITION from photos: Check keyboard for worn key labels, cracked or deformed chassis, damaged hinges, screen bleeding/yellowing at corners. Grade: Excellent / Good / Fair / Poor.\n2. SPECS from listing text: CPU generation (i5-8xxx or i7-8xxx preferred), RAM (16GB preferred — reject 8GB unless price is very low), storage (NVMe SSD only — reject HDD).\n3. BATTERY: Look for seller-reported battery wear cycle count or capacity %. Prefer <30% wear. Flag if no battery info given.\n4. RED FLAGS — reject immediately if: seller mentions BIOS/supervisor password, 'locked', 'needs repair', liquid damage stains visible in photos, or yellowed screen.\n5. PRICE CHECK: For a Gen 7 in Good condition with 16GB RAM + 512GB SSD, fair Ukrainian market price is ~10,000-14,000 UAH. Flag if price is suspiciously low (possible defect) or too high.\nReturn your assessment with a clear Buy / Pass recommendation."

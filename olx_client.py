@@ -63,9 +63,12 @@ async def fetch_offers(
             try:
                 response = await client.get(OLX_API_BASE, params=base_params)
 
-                if response.status_code == 429:
+                if response.status_code in (403, 429):
                     logger.warning(
-                        "OLX rate-limited (429). Backing off %d s …", backoff
+                        "OLX returned HTTP %d (rate-limit / bot protection). Detail: %s. Backing off %d s …",
+                        response.status_code,
+                        response.text[:180],
+                        backoff,
                     )
                     await asyncio.sleep(backoff)
                     backoff = min(backoff * BACKOFF_FACTOR, BACKOFF_MAX)
@@ -85,7 +88,10 @@ async def fetch_offers(
 
             except httpx.HTTPStatusError as exc:
                 logger.error(
-                    "HTTP error fetching OLX page %d: %s", page + 1, exc
+                    "HTTP error fetching OLX page %d: %s (Response: %s)",
+                    page + 1,
+                    exc,
+                    exc.response.text[:200] if exc.response else "N/A",
                 )
                 return all_offers  # return what we have so far
 

@@ -68,6 +68,14 @@ def _build_http_client() -> httpx.AsyncClient:
         ),
         "Accept-Language": "uk-UA,uk;q=0.9,en-US;q=0.8,en;q=0.7",
         "Accept": "application/json",
+        "Referer": "https://www.olx.ua/",
+        "Origin": "https://www.olx.ua",
+        "sec-ch-ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"Linux"',
+        "sec-fetch-dest": "empty",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-site": "same-origin",
     }
     return httpx.AsyncClient(headers=headers, timeout=30.0, follow_redirects=True)
 
@@ -135,7 +143,7 @@ async def process_offer(
 
 # ── Per-Task Scan Loop ────────────────────────────────────────────────────────
 
-async def run_task_loop(task: dict[str, Any]) -> None:
+async def run_task_loop(task: dict[str, Any], initial_delay: float = 0.0) -> None:
     """
     Infinite loop for a single configured task.
 
@@ -152,6 +160,10 @@ async def run_task_loop(task: dict[str, Any]) -> None:
         "Task '%s' started — polling every %ds with params %s",
         task_name, poll_interval, olx_params,
     )
+
+    if initial_delay > 0:
+        logger.debug("Task '%s' delaying start by %.1fs to stagger initial requests", task_name, initial_delay)
+        await asyncio.sleep(initial_delay)
 
     async with _build_http_client() as client:
         while True:
@@ -203,7 +215,10 @@ async def main() -> None:
 
     logger.info("OLX Hunter AI daemon starting — %d task(s) active", len(tasks))
 
-    task_coroutines = [run_task_loop(task) for task in tasks]
+    task_coroutines = [
+        run_task_loop(task, initial_delay=idx * 6.0)
+        for idx, task in enumerate(tasks)
+    ]
     results = await asyncio.gather(*task_coroutines, return_exceptions=True)
 
     for task_cfg, result in zip(tasks, results):
