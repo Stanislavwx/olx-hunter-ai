@@ -65,7 +65,7 @@
         "32gb",
         "32гб"
       ],
-      "ai_prompt": "Act as a sysadmin evaluating a used NVMe SSD for purchase. Priority targets: Samsung PM9A1, 980 Pro, Kingston KC3000, or WD SN850.\n\nКРИТИЧНІ ПРАВИЛА:\n1. ЦІЛЬ — ТІЛЬКИ САМ НАКОПИЧУВАЧ (M.2 NVMe SSD)! Якщо це перехідник (PCIe to NVMe), радіатор, термопрокладка, кишеня або корпус для SSD — ВІДХИЛЯТИ НЕГАЙНО (is_good_deal = false, confidence = 0)!\n2. ОБ'ЄМ ДИСКА — СУВОРО ВІД 1TB (980GB, 1000GB, 1TB, 2TB або більше)! Будь-які диски меншого об'єму (128GB, 256GB, 500GB, 512GB) — ВІДХИЛЯТИ НЕГАЙНО (is_good_deal = false, confidence = 0)!\n3. Перевіряй скріншоти CrystalDiskInfo: 'Total Host Writes' (конвертуй в TB) та здоров'я (повинно бути >95%).\n4. Відхиляй QLC NAND, безбуферні (DRAM-less) контролери або підозріло дешеві диски без тестів.\n5. Відхиляй накопичувачі після майнінгу ('ферма', '24/7')."
+      "ai_prompt": "Act as a sysadmin evaluating a used NVMe SSD for purchase. Priority targets: Samsung PM9A1, 980 Pro, Kingston KC3000, or WD SN850.\n\nКРИТИЧНІ ПРАВИЛА:\n1. ЦІЛЬ — ТІЛЬКИ САМ НАКОПИЧУВАЧ (M.2 NVMe SSD)! Якщо це перехідник (PCIe to NVMe), радіатор, термопрокладка, кишеня або корпус для SSD — ВІДХИЛЯТИ НЕГАЙНО (is_good_deal = false, confidence = 0)!\n2. ОБ'ЄМ ДИСКА — СУВОРО ВІД 1TB (980GB, 1000GB, 1TB, 2TB або більше)! Будь-які диски меншого об'єму (128GB, 256GB, 500GB, 512GB) — ВІДХИЛЯТИ НЕГАЙНО (is_good_deal = false, confidence = 0)!\n3. Перевіряй скріншоти CrystalDiskInfo: 'Total Host Writes' (конвертуй в TB) та здоров'я (повинно бути >90%).\n4. Відхиляй QLC NAND, безбуферні (DRAM-less) контролери.\n5. Відхиляй накопичувачі після майнінгу ('ферма', '24/7')."
     },
     {
       "name": "PC Flipping Under 5k UAH",
