@@ -17,15 +17,9 @@ services:
     env_file:
       - .env
 
-    # Mount SQLite database directory and source files for hot-reload
+    # Mount SQLite database directory for persistence across restarts
     volumes:
       - olx_data:/app/data
-      - ./config.json:/app/config.json:ro
-      - ./main.py:/app/main.py:ro
-      - ./olx_client.py:/app/olx_client.py:ro
-      - ./ai_analyzer.py:/app/ai_analyzer.py:ro
-      - ./telegram_bot.py:/app/telegram_bot.py:ro
-      - ./database.py:/app/database.py:ro
 
     # Resource limits — prevent runaway memory on the host
     deploy:

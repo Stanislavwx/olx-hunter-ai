@@ -42,9 +42,10 @@ cp .env.example .env
 
 ```dotenv
 GEMINI_API_KEY=AIza...          # from https://aistudio.google.com/app/apikey
-GEMINI_MODEL_NAME=gemini-2.0-flash
+GEMINI_MODEL_NAME=gemini-3.1-flash-lite-preview
 TELEGRAM_BOT_TOKEN=123456:ABC-DEF...   # from @BotFather
 TELEGRAM_CHAT_ID=-100123456789         # your chat/channel/group ID
+ALERT_LANGUAGE=ua                      # 'ua' or 'en'
 ```
 
 > **Get your Chat ID:**  

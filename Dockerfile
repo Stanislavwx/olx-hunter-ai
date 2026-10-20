@@ -16,6 +16,10 @@ RUN pip install --upgrade pip && \
 # ── Runtime stage ─────────────────────────────────────────────────────────────
 FROM python:3.11-slim AS runtime
 
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
 # Security: run as a non-root user
 RUN groupadd -r appuser && useradd -r -g appuser appuser
 

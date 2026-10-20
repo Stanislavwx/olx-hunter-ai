@@ -1,8 +1,8 @@
 """
-olx_client.py — Async OLX.ua REST API client.
+olx_client.py — Async OLX.ua REST API client with Chrome TLS impersonation.
 
-Fetches paginated listings with exponential backoff for 429 rate-limit responses
-and randomised inter-request delays to mimic human browsing behaviour.
+Uses `curl_cffi` to mimic Google Chrome's authentic TLS/JA3/JA4 fingerprint and HTTP/2
+behavior, completely bypassing CloudFront and Akamai WAF 403 blocks.
 """
 
 import asyncio
@@ -10,31 +10,31 @@ import logging
 import random
 from typing import Any
 
-import httpx
+from curl_cffi.requests import AsyncSession
 
 logger = logging.getLogger(__name__)
 
 OLX_API_BASE = "https://www.olx.ua/api/v1/offers/"
 
 # Delay range (seconds) between successive API calls — mimics human browsing
-REQUEST_DELAY_MIN = 10
-REQUEST_DELAY_MAX = 25
+REQUEST_DELAY_MIN = 8
+REQUEST_DELAY_MAX = 20
 
 # Exponential-backoff parameters for HTTP 429
-BACKOFF_BASE = 30      # seconds for the first retry
-BACKOFF_MAX = 300      # never wait longer than 5 minutes
+BACKOFF_BASE = 20
+BACKOFF_MAX = 180
 BACKOFF_FACTOR = 2
 
 
 async def _sleep_between_requests() -> None:
     """Sleep a random interval between OLX API calls."""
     delay = random.uniform(REQUEST_DELAY_MIN, REQUEST_DELAY_MAX)
-    logger.debug("Rate-limit courtesy sleep: %.1f s", delay)
+    logger.debug("Courtesy sleep between pages: %.1f s", delay)
     await asyncio.sleep(delay)
 
 
 async def fetch_offers(
-    client: httpx.AsyncClient,
+    client: AsyncSession,
     params: dict[str, Any],
     max_pages: int = 3,
 ) -> list[dict[str, Any]]:
@@ -42,7 +42,7 @@ async def fetch_offers(
     Fetch up to *max_pages* of offers from the OLX API.
 
     Args:
-        client:     Shared async HTTP client.
+        client:     Shared async curl_cffi session with Chrome impersonation.
         params:     OLX query parameters (category_id, query, price_from, …).
         max_pages:  Maximum number of result pages to retrieve per scan cycle.
 
@@ -50,7 +50,7 @@ async def fetch_offers(
         Flat list of raw offer dicts from the API.
     """
     all_offers: list[dict[str, Any]] = []
-    base_params = dict(params)  # shallow copy so caller's dict is untouched
+    base_params = dict(params)  # shallow copy
     base_params.setdefault("offset", 0)
     base_params.setdefault("limit", 40)
     base_params.setdefault("sort_by", "created_at:desc")
@@ -86,19 +86,8 @@ async def fetch_offers(
                 logger.info("Page %d: fetched %d offers", page + 1, len(offers))
                 break  # success — move to next page
 
-            except httpx.HTTPStatusError as exc:
-                logger.error(
-                    "HTTP error fetching OLX page %d: %s (Response: %s)",
-                    page + 1,
-                    exc,
-                    exc.response.text[:200] if exc.response else "N/A",
-                )
-                return all_offers  # return what we have so far
-
-            except httpx.RequestError as exc:
-                logger.error(
-                    "Network error fetching OLX page %d: %s", page + 1, exc
-                )
+            except Exception as exc:  # noqa: BLE001
+                logger.error("Error fetching OLX page %d: %s", page + 1, exc)
                 return all_offers
 
         if page < max_pages - 1:
@@ -108,7 +97,7 @@ async def fetch_offers(
 
 
 async def download_images(
-    client: httpx.AsyncClient,
+    client: AsyncSession,
     image_urls: list[str],
     max_images: int = 4,
 ) -> list[bytes]:
@@ -116,7 +105,7 @@ async def download_images(
     Download up to *max_images* images, skipping broken links gracefully.
 
     Args:
-        client:     Shared async HTTP client.
+        client:     Shared async session.
         image_urls: List of image URLs extracted from an offer.
         max_images: Hard cap to keep AI payloads small.
 
@@ -126,7 +115,7 @@ async def download_images(
     results: list[bytes] = []
     for url in image_urls[:max_images]:
         try:
-            resp = await client.get(url, follow_redirects=True, timeout=15.0)
+            resp = await client.get(url, timeout=15.0)
             resp.raise_for_status()
             results.append(resp.content)
             logger.debug("Downloaded image (%d bytes) from %s", len(resp.content), url)
@@ -148,6 +137,5 @@ def extract_image_urls(offer: dict[str, Any]) -> list[str]:
     for photo in photos:
         link: str = photo.get("link", "")
         if link:
-            # Resolve size placeholders — 720×540 is a good quality/size tradeoff
             urls.append(link.replace("{width}", "720").replace("{height}", "540"))
     return urls
