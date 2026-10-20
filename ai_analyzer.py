@@ -62,6 +62,13 @@ def _build_prompt(offer: dict[str, Any], task_prompt: str) -> str:
     description = offer.get("description", "N/A")
     url = offer.get("url", "N/A")
 
+    lang = os.environ.get("ALERT_LANGUAGE", "ua").strip().lower()
+    lang_instruction = (
+        "Write your 'extracted_specs' and 'reason' strictly in Ukrainian language (українською мовою)."
+        if lang == "ua" else
+        "Write your 'extracted_specs' and 'reason' strictly in English."
+    )
+
     return (
         f"LISTING TITLE: {title}\n"
         f"PRICE: {price_str}\n"
@@ -69,7 +76,8 @@ def _build_prompt(offer: dict[str, Any], task_prompt: str) -> str:
         f"DESCRIPTION (first 800 chars):\n{description[:800]}\n\n"
         f"---\n"
         f"EXPERT EVALUATION TASK:\n{task_prompt}\n\n"
-        f"Analyse the listing text and attached images carefully. "
+        f"Analyse the listing text and attached images carefully.\n"
+        f"{lang_instruction}\n"
         f"Return ONLY a valid JSON object matching the required schema. "
         f"Be concise in extracted_specs and reason (max 300 chars each)."
     )

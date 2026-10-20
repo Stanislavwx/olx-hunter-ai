@@ -2,7 +2,7 @@
 telegram_bot.py — Pure async Telegram alerts via the Bot HTTP API.
 
 Sends richly formatted HTML messages with an inline "View on OLX" button.
-Uses httpx directly (no python-telegram-bot dependency) for minimal footprint.
+Supports configurable language (UA / EN) via the ALERT_LANGUAGE environment variable.
 """
 
 import logging
@@ -15,8 +15,29 @@ logger = logging.getLogger(__name__)
 
 TELEGRAM_API_BASE = "https://api.telegram.org/bot{token}/sendMessage"
 
-# Confidence threshold above which we display a ⭐ star rating
-HIGH_CONFIDENCE_THRESHOLD = 75
+# Localization dictionaries
+MESSAGES = {
+    "ua": {
+        "header": "🔥 <b>ВИГІДНА ПРОПОЗИЦІЯ!</b> — <i>{task_name}</i>",
+        "price": "💰 <b>Ціна:</b> {price}",
+        "city": "📍 <b>Місто:</b> {city}",
+        "confidence": "🤖 <b>Впевненість ШІ:</b> {confidence}% {stars}",
+        "specs": "🔩 <b>Характеристики:</b> <code>{specs}</code>",
+        "reason": "💡 <b>Причина:</b> {reason}",
+        "footer": "<i>Працює на OLX Hunter AI 🤖</i>",
+        "btn_view": "👁 Переглянути на OLX",
+    },
+    "en": {
+        "header": "🔥 <b>GOOD DEAL FOUND!</b> — <i>{task_name}</i>",
+        "price": "💰 <b>Price:</b> {price}",
+        "city": "📍 <b>City:</b> {city}",
+        "confidence": "🤖 <b>AI Confidence:</b> {confidence}% {stars}",
+        "specs": "🔩 <b>Specs:</b> <code>{specs}</code>",
+        "reason": "💡 <b>Reason:</b> {reason}",
+        "footer": "<i>Powered by OLX Hunter AI 🤖</i>",
+        "btn_view": "👁 View on OLX",
+    },
+}
 
 
 def _confidence_stars(confidence: int) -> str:
@@ -31,11 +52,12 @@ def _build_message(
     task_name: str,
 ) -> tuple[str, dict]:
     """
-    Build the HTML message body and inline keyboard for a Telegram alert.
-
-    Returns:
-        Tuple of (html_text, reply_markup_dict).
+    Build the HTML message body and inline keyboard for a Telegram alert
+    in the configured language (ALERT_LANGUAGE=ua or en).
     """
+    lang = os.environ.get("ALERT_LANGUAGE", "ua").strip().lower()
+    texts = MESSAGES.get(lang, MESSAGES["ua"])
+
     title: str = offer.get("title", "N/A")
     url: str = offer.get("url", "#")
     price_str = "N/A"
@@ -45,29 +67,28 @@ def _build_message(
             break
 
     city: str = offer.get("location", {}).get("city", {}).get("name", "N/A")
-
     confidence: int = analysis.get("confidence", 0)
     specs: str = analysis.get("extracted_specs", "—")
     reason: str = analysis.get("reason", "—")
     stars = _confidence_stars(confidence)
 
     text = (
-        f"🔥 <b>GOOD DEAL FOUND!</b> — <i>{task_name}</i>\n"
+        f"{texts['header'].format(task_name=task_name)}\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"📦 <b>{title}</b>\n"
-        f"💰 <b>Price:</b> {price_str}\n"
-        f"📍 <b>City:</b> {city}\n"
+        f"{texts['price'].format(price=price_str)}\n"
+        f"{texts['city'].format(city=city)}\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"🤖 <b>AI Confidence:</b> {confidence}% {stars}\n"
-        f"🔩 <b>Specs:</b> <code>{specs}</code>\n"
-        f"💡 <b>Reason:</b> {reason}\n"
+        f"{texts['confidence'].format(confidence=confidence, stars=stars)}\n"
+        f"{texts['specs'].format(specs=specs)}\n"
+        f"{texts['reason'].format(reason=reason)}\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"<i>Powered by OLX Hunter AI 🤖</i>"
+        f"{texts['footer']}"
     )
 
     reply_markup = {
         "inline_keyboard": [
-            [{"text": "👁 View on OLX", "url": url}]
+            [{"text": texts["btn_view"], "url": url}]
         ]
     }
 
@@ -81,14 +102,6 @@ async def send_alert(
 ) -> bool:
     """
     Send a formatted Telegram alert for a confirmed good deal.
-
-    Args:
-        offer:     Raw OLX offer dict.
-        analysis:  Parsed Gemini JSON response.
-        task_name: Human-readable name from config.json for context.
-
-    Returns:
-        True on success, False on any error.
     """
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat_id = os.environ.get("TELEGRAM_CHAT_ID")
