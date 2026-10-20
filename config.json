@@ -1,0 +1,40 @@
+{
+  "tasks": [
+    {
+      "name": "SSD NVMe Hunter",
+      "poll_interval_seconds": 300,
+      "max_pages": 3,
+      "olx_params": {
+        "category_id": "89",
+        "query": "nvme",
+        "filter_float_price:from": "1000",
+        "filter_float_price:to": "4000",
+        "currency": "UAH"
+      },
+      "ai_prompt": "Act as a sysadmin evaluating a used NVMe SSD for purchase. Priority targets: Samsung PM9A1, 980 Pro, Kingston KC3000, or WD SN850. MANDATORY checks:\n1. Inspect any CrystalDiskInfo or CrystalDiskMark screenshots: extract 'Total Host Writes' and convert to TB (must be <300 TB for consumer drives). Health status must be >95%.\n2. Check the drive model visible in photos or screenshots — reject QLC NAND, DRAM-less controllers (e.g., SM2267XT, SM2269XT), or any drive suspiciously cheap with no health screenshot.\n3. Reject drives used in mining rigs (seller mentions 'ферма', '24/7', or similar).\n4. Verify the listed capacity matches photos. Flag if it seems mislabeled.\nOutput a concise summary of drive model, health %, THW in TB, and your buy/pass recommendation with confidence."
+    },
+    {
+      "name": "PC Flipping Under 5k UAH",
+      "poll_interval_seconds": 360,
+      "max_pages": 3,
+      "olx_params": {
+        "category_id": "84",
+        "query": "ПК",
+        "filter_float_price:from": "2000",
+        "filter_float_price:to": "5000",
+        "currency": "UAH"
+      },
+      "ai_prompt": "Act as a PC flipping expert evaluating a used desktop PC for profitable resale potential. TARGET criteria:\n- Platform: AMD AM4 (any Ryzen) OR Intel LGA1151v2 / LGA1200 (8th, 9th, 10th gen Core i5/i7). These can be upgraded cheaply.\n- RAM: Must be DDR4. Minimum 8GB to be viable.\n- Verify from motherboard photos that it uses a standard ATX or mATX form factor (no proprietary slim/OEM boards).\n- Check PSU label in photos for wattage — must be ≥400W or have a free PCIe slot for GPU upgrade.\nREJECT immediately if any of these are true:\n  - DDR2 or DDR3 RAM systems\n  - Intel LGA1155 (Sandy/Ivy Bridge), LGA775 (Core2), or AMD FX/Phenom\n  - Xeon on Huananzhi / generic Chinese X99 boards\n  - Ultra-slim or branded office PCs (HP EliteDesk SFF, Dell OptiPlex SFF) with proprietary PSUs\n  - No photos of internals at all\nFINAL CALC: Estimate if buying this PC + a used RX 580 or GTX 1060 (~2500 UAH) would yield a gaming build resellable for 8000+ UAH. Is the profit margin worth it?"
+    },
+    {
+      "name": "ThinkPad X1 Carbon Gen 7",
+      "poll_interval_seconds": 420,
+      "max_pages": 2,
+      "olx_params": {
+        "category_id": "43",
+        "query": "thinkpad x1 carbon gen 7"
+      },
+      "ai_prompt": "Act as an IT hardware buyer assessing a used ThinkPad X1 Carbon Gen 7 (2019 model) for purchase. Evaluate:\n1. PHYSICAL CONDITION from photos: Check keyboard for worn key labels, cracked or deformed chassis, damaged hinges, screen bleeding/yellowing at corners. Grade: Excellent / Good / Fair / Poor.\n2. SPECS from listing text: CPU generation (i5-8xxx or i7-8xxx preferred), RAM (16GB preferred — reject 8GB unless price is very low), storage (NVMe SSD only — reject HDD).\n3. BATTERY: Look for seller-reported battery wear cycle count or capacity %. Prefer <30% wear. Flag if no battery info given.\n4. RED FLAGS — reject immediately if: seller mentions BIOS/supervisor password, 'locked', 'needs repair', liquid damage stains visible in photos, or yellowed screen.\n5. PRICE CHECK: For a Gen 7 in Good condition with 16GB RAM + 512GB SSD, fair Ukrainian market price is ~10,000-14,000 UAH. Flag if price is suspiciously low (possible defect) or too high.\nReturn your assessment with a clear Buy / Pass recommendation."
+    }
+  ]
+}

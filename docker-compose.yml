@@ -1,0 +1,52 @@
+version: "3.9"
+
+services:
+  olx-hunter:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    image: olx-hunter-ai:latest
+    container_name: olx-hunter-ai
+
+    # Restart policy: always bring back up unless explicitly stopped
+    restart: unless-stopped
+
+    # Load secrets from .env file (never bake these into the image)
+    env_file:
+      - .env
+
+    # Mount SQLite database directory for persistence across restarts
+    volumes:
+      - olx_data:/app/data
+
+    # Override config.json without rebuilding — mount it from host
+    # Uncomment the line below if you want hot-reload of config changes:
+    # - ./config.json:/app/config.json:ro
+
+    # Resource limits — prevent runaway memory on the host
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.50"
+        reservations:
+          memory: 128M
+
+    # Health check: verify the process is running every 60s
+    healthcheck:
+      test: ["CMD", "python", "-c", "import asyncio, aiosqlite; asyncio.run(aiosqlite.connect('data/seen_offers.db'))"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  olx_data:
+    driver: local

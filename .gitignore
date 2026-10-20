@@ -1,0 +1,23 @@
+# Secrets — never commit
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# SQLite data
+data/
+
+# Docker
+.dockerignore
+
+# Editor
+.vscode/
+.idea/
+*.swp
