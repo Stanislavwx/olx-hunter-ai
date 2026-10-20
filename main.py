@@ -113,12 +113,20 @@ async def process_offer(
 
 # ── Per-Task Scan Routine ─────────────────────────────────────────────────────
 
-async def scan_task(client: AsyncSession, task: dict[str, Any]) -> None:
-    """Execute a single scan cycle for one active task."""
+async def scan_task(client: AsyncSession, task: dict[str, Any], max_pages: int = 3) -> None:
+    """
+    Execute an incremental scan cycle for one active task.
+
+    Fetches listings sorted strictly from newest to oldest (`created_at:desc`).
+    Early-exits as soon as already-processed offers are encountered, ensuring
+    maximum speed and zero redundant requests.
+    """
     task_name = task.get("name", "unnamed")
     params: dict[str, Any] = {
         "query": task.get("query", ""),
         "currency": "UAH",
+        "sort_by": "created_at:desc",
+        "limit": 40,
     }
     cat_id = str(task.get("category_id", "0"))
     if cat_id and cat_id != "0":
@@ -129,12 +137,49 @@ async def scan_task(client: AsyncSession, task: dict[str, Any]) -> None:
     if task.get("price_to"):
         params["filter_float_price:to"] = str(task["price_to"])
 
-    logger.info("→ Scanning task '%s' (query: '%s')", task_name, params["query"])
-    offers = await fetch_offers(client, params, max_pages=3)
-    logger.info("← Task '%s': fetched %d total offers", task_name, len(offers))
+    logger.info("→ Scanning task '%s' (query: '%s', price: %s-%s грн)",
+                task_name, params["query"], task.get("price_from", 0), task.get("price_to", 0))
 
-    for offer in offers:
-        await process_offer(client, offer, task)
+    new_offers_count = 0
+    consecutive_seen = 0
+    EARLY_STOP_THRESHOLD = 8  # stop paging if 8 consecutive offers were already seen
+
+    for page in range(max_pages):
+        page_params = dict(params)
+        page_params["offset"] = page * 40
+
+        offers = await fetch_offers(client, page_params, max_pages=1)
+        if not offers:
+            break
+
+        logger.debug("Task '%s' page %d: fetched %d offers", task_name, page + 1, len(offers))
+
+        for offer in offers:
+            offer_id = str(offer.get("id", ""))
+            if not offer_id:
+                continue
+
+            if await is_offer_seen(offer_id):
+                consecutive_seen += 1
+                if consecutive_seen >= EARLY_STOP_THRESHOLD:
+                    logger.debug(
+                        "Task '%s': reached %d seen offers in a row — all older listings already indexed.",
+                        task_name, consecutive_seen
+                    )
+                    break
+            else:
+                consecutive_seen = 0
+                new_offers_count += 1
+                await process_offer(client, offer, task)
+
+        # If we hit the boundary of already seen offers on this page, stop paging
+        if consecutive_seen >= EARLY_STOP_THRESHOLD:
+            break
+
+        if page < max_pages - 1:
+            await asyncio.sleep(2)
+
+    logger.info("← Task '%s' scan finished. New offers processed: %d", task_name, new_offers_count)
 
 
 # ── Continuous Dynamic Scheduler ──────────────────────────────────────────────

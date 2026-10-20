@@ -3,7 +3,7 @@ database.py — SQLite state management via aiosqlite.
 
 Manages:
 - Seen offers deduplication across restarts.
-- Dynamic task management (create, list, pause, resume, delete from Telegram).
+- Dynamic task management (create, list, edit, pause, resume, delete from Telegram).
 - Runtime settings (minimum confidence, language).
 - Global analytics & counters.
 """
@@ -22,7 +22,7 @@ CONFIG_PATH = Path("config.json")
 
 
 async def init_db() -> None:
-    """Initialize SQLite tables and migrate default tasks from config.json if empty."""
+    """Initialize SQLite tables and migrate default tasks from config.json."""
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
@@ -43,7 +43,7 @@ async def init_db() -> None:
             """
             CREATE TABLE IF NOT EXISTS tasks (
                 id             INTEGER PRIMARY KEY AUTOINCREMENT,
-                name           TEXT NOT NULL,
+                name           TEXT NOT NULL UNIQUE,
                 category_id    TEXT NOT NULL,
                 query          TEXT NOT NULL,
                 price_from     INTEGER DEFAULT 0,
@@ -82,24 +82,44 @@ async def init_db() -> None:
         await db.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('min_confidence', '70')")
         await db.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('language', 'ua')")
 
-        # Migrate default tasks from config.json if table is empty
-        async with db.execute("SELECT COUNT(*) as cnt FROM tasks") as cur:
-            row = await cur.fetchone()
-            if row and row["cnt"] == 0 and CONFIG_PATH.exists():
-                try:
-                    with CONFIG_PATH.open(encoding="utf-8") as fh:
-                        data = json.load(fh)
-                    for t in data.get("tasks", []):
-                        params = t.get("olx_params", {})
-                        p_from = int(params.get("filter_float_price:from", 0))
-                        p_to = int(params.get("filter_float_price:to", 0))
+        # Sync tasks from config.json
+        if CONFIG_PATH.exists():
+            try:
+                with CONFIG_PATH.open(encoding="utf-8") as fh:
+                    data = json.load(fh)
+                for t in data.get("tasks", []):
+                    params = t.get("olx_params", {})
+                    p_from = int(params.get("filter_float_price:from", 0))
+                    p_to = int(params.get("filter_float_price:to", 0))
+                    t_name = t.get("name", "Unnamed")
+
+                    async with db.execute("SELECT id FROM tasks WHERE name = ?", (t_name,)) as cur:
+                        existing = await cur.fetchone()
+
+                    if existing:
+                        await db.execute(
+                            """
+                            UPDATE tasks SET category_id = ?, query = ?, price_from = ?, price_to = ?, ai_prompt = ?, poll_interval = ?
+                            WHERE id = ?
+                            """,
+                            (
+                                params.get("category_id", "0"),
+                                params.get("query", ""),
+                                p_from,
+                                p_to,
+                                t.get("ai_prompt", "Evaluate offer."),
+                                int(t.get("poll_interval_seconds", 300)),
+                                existing["id"],
+                            ),
+                        )
+                    else:
                         await db.execute(
                             """
                             INSERT INTO tasks (name, category_id, query, price_from, price_to, ai_prompt, poll_interval, is_active)
                             VALUES (?, ?, ?, ?, ?, ?, ?, 1)
                             """,
                             (
-                                t.get("name", "Unnamed"),
+                                t_name,
                                 params.get("category_id", "0"),
                                 params.get("query", ""),
                                 p_from,
@@ -108,9 +128,9 @@ async def init_db() -> None:
                                 int(t.get("poll_interval_seconds", 300)),
                             ),
                         )
-                    logger.info("Migrated initial tasks from config.json into SQLite database.")
-                except Exception as exc:  # noqa: BLE001
-                    logger.error("Failed to migrate initial config.json: %s", exc)
+                logger.info("Synchronized tasks from config.json into SQLite database.")
+            except Exception as exc:  # noqa: BLE001
+                logger.error("Failed to sync config.json: %s", exc)
 
         await db.commit()
     logger.info("Database initialised at %s", DB_PATH)
@@ -138,7 +158,7 @@ async def mark_offer_seen(offer_id: str, task_name: str) -> None:
         await db.commit()
 
 
-# ── Task CRUD ─────────────────────────────────────────────────────────────────
+# ── Task CRUD & Live Editing ──────────────────────────────────────────────────
 
 async def get_active_tasks() -> list[dict[str, Any]]:
     """Return all currently active search tasks."""
@@ -187,6 +207,30 @@ async def add_task(
         )
         await db.commit()
         return cursor.lastrowid or 0
+
+
+async def update_task_prompt(task_id: int, new_prompt: str) -> bool:
+    """Update AI prompt for a specific task."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("UPDATE tasks SET ai_prompt = ? WHERE id = ?", (new_prompt, task_id))
+        await db.commit()
+        return True
+
+
+async def update_task_prices(task_id: int, price_from: int, price_to: int) -> bool:
+    """Update price bounds for a specific task."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("UPDATE tasks SET price_from = ?, price_to = ? WHERE id = ?", (price_from, price_to, task_id))
+        await db.commit()
+        return True
+
+
+async def update_task_query(task_id: int, new_query: str) -> bool:
+    """Update query keyword for a specific task."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("UPDATE tasks SET query = ? WHERE id = ?", (new_query, task_id))
+        await db.commit()
+        return True
 
 
 async def toggle_task(task_id: int) -> bool:
