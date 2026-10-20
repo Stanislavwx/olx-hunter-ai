@@ -341,11 +341,12 @@ def _install_signal_handlers(loop: asyncio.AbstractEventLoop) -> None:
 
 
 if __name__ == "__main__":
-    loop = asyncio.get_event_loop()
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     _install_signal_handlers(loop)
     try:
         loop.run_until_complete(main())
-    except asyncio.CancelledError:
+    except (KeyboardInterrupt, asyncio.CancelledError):
         logger.info("Daemon shut down cleanly.")
     finally:
         loop.close()
