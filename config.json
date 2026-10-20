@@ -24,7 +24,7 @@
         "кулер",
         "куплю"
       ],
-      "ai_prompt": "Act as a sysadmin evaluating a used NVMe SSD for purchase. Priority targets: Samsung PM9A1, 980 Pro, Kingston KC3000, or WD SN850.\n\nКРИТИЧНІ ПРАВИЛА:\n1. ЦІЛЬ — ТІЛЬКИ САМ НАКОПИЧУВАЧ (M.2 NVMe SSD)! Якщо це перехідник (PCIe to NVMe), радіатор, термопрокладка, кишеня або корпус для SSD — ВІДХИЛЯТИ НЕГАЙНО (is_good_deal = false, confidence = 0)!\n2. Перевіряй скріншоти CrystalDiskInfo: 'Total Host Writes' (конвертуй в TB) та здоров'я (повинно бути >95%).\n3. Відхиляй QLC NAND, безбуферні (DRAM-less) контролери або підозріло дешеві диски без тестів.\n4. Відхиляй накопичувачі після майнінгу ('ферма', '24/7').\n4 Диск має бути об'ємом 1TB (980гб або більше)"
+      "ai_prompt": "Act as a sysadmin evaluating a used NVMe SSD for purchase. Priority targets: Samsung PM9A1, 980 Pro, Kingston KC3000, or WD SN850.\n\nКРИТИЧНІ ПРАВИЛА:\n1. ЦІЛЬ — ТІЛЬКИ САМ НАКОПИЧУВАЧ (M.2 NVMe SSD)! Якщо це перехідник (PCIe to NVMe), радіатор, термопрокладка, кишеня або корпус для SSD — ВІДХИЛЯТИ НЕГАЙНО (is_good_deal = false, confidence = 0)!\n2. Перевіряй скріншоти CrystalDiskInfo: 'Total Host Writes' (конвертуй в TB) та здоров'я (повинно бути >95%).\n3. Відхиляй QLC NAND, безбуферні (DRAM-less) контролери або підозріло дешеві диски без тестів.\n4. Відхиляй накопичувачі після майнінгу ('ферма', '24/7').\n5. ОБ'ЄМ: ТІЛЬКИ ВІД 1TB (980GB або більше)! Менші об'єми (128GB, 256GB, 500GB, 512GB) — ВІДХИЛЯТИ (is_good_deal = false, confidence = 0)!"
     },
     {
       "name": "PC Flipping Under 5k UAH",

@@ -247,13 +247,12 @@ async def scan_task(
             if deal_found:
                 deals_count += 1
 
-        # In regular monitoring, if an entire page has 0 new offers, older listings are already known
-        if new_on_this_page == 0 and not deep_scan:
-            logger.info("Task '%s': all %d offers on page %d already seen — scan up to date.", task_name, len(offers), page + 1)
-            break
+        if new_on_this_page == 0:
+            logger.info("Task '%s' page %d: all %d offers already seen.", task_name, page + 1, len(offers))
 
         # If OLX returned fewer offers than page limit, we reached the end of results
         if len(offers) < int(page_params.get("limit", 40)):
+            logger.debug("Task '%s' reached end of OLX listings on page %d.", task_name, page + 1)
             break
 
         if page < max_pages - 1:
