@@ -335,12 +335,27 @@ async def show_task_detail(chat_id: int, task_id: int, message_id: int | None = 
     if task["price_from"] or task["price_to"]:
         price_str = f"від <b>{task['price_from']}</b> до <b>{task['price_to']}</b> грн"
 
+    cat_map = {
+        "458": "458 (Комплектуючі для ПК / SSD)",
+        "78": "78 (Настільні комп'ютери)",
+        "80": "80 (Ноутбуки)",
+        "0": "Всі категорії",
+    }
+    cat_display = cat_map.get(str(task.get("category_id", "0")), str(task.get("category_id", "0")))
+
+    extra_info = ""
+    if task.get("exclude_keywords"):
+        kws = task["exclude_keywords"]
+        if isinstance(kws, list) and kws:
+            extra_info += f"🚫 <b>Стоп-слова:</b> <code>{', '.join(kws[:5])}{'...' if len(kws)>5 else ''}</code>\n"
+
     text = (
         f"🎯 <b>Завдання:</b> {task['name']}\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"🔎 <b>Пошуковий запит:</b> <code>{task['query']}</code>\n"
-        f"📂 <b>Категорія OLX:</b> {task['category_id']}\n"
+        f"📂 <b>Категорія OLX:</b> {cat_display}\n"
         f"💰 <b>Ціна:</b> {price_str}\n"
+        f"{extra_info}"
         f"⏱ <b>Інтервал:</b> {task['poll_interval']} сек\n"
         f"📊 <b>Статус:</b> <b>{status_str}</b>\n"
         f"🗄 <b>В базі для цього завдання:</b> {task_seen} оголошень\n"

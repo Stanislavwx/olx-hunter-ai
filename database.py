@@ -84,11 +84,15 @@ async def init_db() -> None:
             """
         )
 
-        # Migration check: ensure max_pages column exists
+        # Migration check: ensure max_pages, extra_params, exclude_keywords columns exist
         async with db.execute("PRAGMA table_info(tasks)") as cur:
             t_cols = [row["name"] for row in await cur.fetchall()]
         if "max_pages" not in t_cols:
             await db.execute("ALTER TABLE tasks ADD COLUMN max_pages INTEGER DEFAULT 3")
+        if "extra_params" not in t_cols:
+            await db.execute("ALTER TABLE tasks ADD COLUMN extra_params TEXT DEFAULT '{}'")
+        if "exclude_keywords" not in t_cols:
+            await db.execute("ALTER TABLE tasks ADD COLUMN exclude_keywords TEXT DEFAULT '[]'")
 
         # 3. Settings table
         await db.execute(
@@ -128,13 +132,22 @@ async def init_db() -> None:
                     t_name = t.get("name", "Unnamed")
                     t_max_pages = int(t.get("max_pages", 3))
 
+                    extra_keys = {
+                        k: v for k, v in params.items()
+                        if k not in ("category_id", "query", "filter_float_price:from", "filter_float_price:to", "currency")
+                    }
+                    extra_json = json.dumps(extra_keys, ensure_ascii=False)
+                    exclude_json = json.dumps(t.get("exclude_keywords", []), ensure_ascii=False)
+
                     async with db.execute("SELECT id FROM tasks WHERE name = ?", (t_name,)) as cur:
                         existing = await cur.fetchone()
 
                     if existing:
                         await db.execute(
                             """
-                            UPDATE tasks SET category_id = ?, query = ?, price_from = ?, price_to = ?, ai_prompt = ?, poll_interval = ?, max_pages = ?
+                            UPDATE tasks
+                            SET category_id = ?, query = ?, price_from = ?, price_to = ?, ai_prompt = ?,
+                                poll_interval = ?, max_pages = ?, extra_params = ?, exclude_keywords = ?
                             WHERE id = ?
                             """,
                             (
@@ -145,14 +158,19 @@ async def init_db() -> None:
                                 t.get("ai_prompt", "Evaluate offer."),
                                 int(t.get("poll_interval_seconds", 300)),
                                 t_max_pages,
+                                extra_json,
+                                exclude_json,
                                 existing["id"],
                             ),
                         )
                     else:
                         await db.execute(
                             """
-                            INSERT INTO tasks (name, category_id, query, price_from, price_to, ai_prompt, poll_interval, max_pages, is_active)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
+                            INSERT INTO tasks (
+                                name, category_id, query, price_from, price_to, ai_prompt,
+                                poll_interval, max_pages, extra_params, exclude_keywords, is_active
+                            )
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
                             """,
                             (
                                 t_name,
@@ -163,6 +181,8 @@ async def init_db() -> None:
                                 t.get("ai_prompt", "Evaluate offer."),
                                 int(t.get("poll_interval_seconds", 300)),
                                 t_max_pages,
+                                extra_json,
+                                exclude_json,
                             ),
                         )
                 logger.info("Synchronized tasks from config.json into SQLite database.")
@@ -230,13 +250,37 @@ async def get_seen_offers_count(task_id: int | None = None) -> int:
 
 # ── Task CRUD & Live Editing ──────────────────────────────────────────────────
 
+def _format_task(row: aiosqlite.Row | None) -> dict[str, Any] | None:
+    """Format an SQLite row into a dict with parsed extra_params and exclude_keywords."""
+    if not row:
+        return None
+    d = dict(row)
+    if "extra_params" in d:
+        try:
+            d["extra_params"] = json.loads(d["extra_params"]) if isinstance(d["extra_params"], str) else (d["extra_params"] or {})
+        except Exception:
+            d["extra_params"] = {}
+    else:
+        d["extra_params"] = {}
+
+    if "exclude_keywords" in d:
+        try:
+            d["exclude_keywords"] = json.loads(d["exclude_keywords"]) if isinstance(d["exclude_keywords"], str) else (d["exclude_keywords"] or [])
+        except Exception:
+            d["exclude_keywords"] = []
+    else:
+        d["exclude_keywords"] = []
+
+    return d
+
+
 async def get_active_tasks() -> list[dict[str, Any]]:
     """Return all currently active search tasks."""
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute("SELECT * FROM tasks WHERE is_active = 1 ORDER BY id ASC") as cur:
             rows = await cur.fetchall()
-            return [dict(r) for r in rows]
+            return [res for r in rows if (res := _format_task(r)) is not None]
 
 
 async def get_all_tasks() -> list[dict[str, Any]]:
@@ -245,7 +289,7 @@ async def get_all_tasks() -> list[dict[str, Any]]:
         db.row_factory = aiosqlite.Row
         async with db.execute("SELECT * FROM tasks ORDER BY id ASC") as cur:
             rows = await cur.fetchall()
-            return [dict(r) for r in rows]
+            return [res for r in rows if (res := _format_task(r)) is not None]
 
 
 async def get_task_by_id(task_id: int) -> dict[str, Any] | None:
@@ -254,7 +298,7 @@ async def get_task_by_id(task_id: int) -> dict[str, Any] | None:
         db.row_factory = aiosqlite.Row
         async with db.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)) as cur:
             row = await cur.fetchone()
-            return dict(row) if row else None
+            return _format_task(row)
 
 
 async def add_task(
@@ -266,15 +310,22 @@ async def add_task(
     ai_prompt: str,
     poll_interval: int = 300,
     max_pages: int = 3,
+    extra_params: dict[str, Any] | None = None,
+    exclude_keywords: list[str] | None = None,
 ) -> int:
     """Create a new search task in SQLite. Returns the new task ID."""
+    extra_json = json.dumps(extra_params or {}, ensure_ascii=False)
+    exclude_json = json.dumps(exclude_keywords or [], ensure_ascii=False)
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
             """
-            INSERT INTO tasks (name, query, category_id, price_from, price_to, ai_prompt, poll_interval, max_pages, is_active)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
+            INSERT INTO tasks (
+                name, query, category_id, price_from, price_to, ai_prompt,
+                poll_interval, max_pages, extra_params, exclude_keywords, is_active
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
             """,
-            (name, query, category_id, price_from, price_to, ai_prompt, poll_interval, max_pages),
+            (name, query, category_id, price_from, price_to, ai_prompt, poll_interval, max_pages, extra_json, exclude_json),
         )
         await db.commit()
         return cursor.lastrowid or 0

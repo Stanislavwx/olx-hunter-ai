@@ -127,8 +127,7 @@ async def analyze_offer(
         response = None
         for attempt in range(1, max_retries + 1):
             try:
-                response = await asyncio.to_thread(
-                    client.models.generate_content,
+                response = await client.aio.models.generate_content(
                     model=model_name,
                     contents=contents,
                     config=config,

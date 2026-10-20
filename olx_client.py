@@ -105,7 +105,7 @@ async def download_images(
     max_images: int = 8,
 ) -> list[bytes]:
     """
-    Download up to *max_images* images, skipping broken links gracefully.
+    Download up to *max_images* images in parallel, skipping broken links gracefully.
 
     Args:
         client:     Shared async session.
@@ -115,16 +115,24 @@ async def download_images(
     Returns:
         List of raw image bytes (may be shorter than *image_urls* if some fail).
     """
-    results: list[bytes] = []
-    for url in image_urls[:max_images]:
+    target_urls = image_urls[:max_images]
+    if not target_urls:
+        return []
+
+    async def _fetch_one(url: str) -> bytes | None:
         try:
-            resp = await client.get(url, timeout=15.0)
-            resp.raise_for_status()
-            results.append(resp.content)
-            logger.debug("Downloaded image (%d bytes) from %s", len(resp.content), url)
+            resp = await client.get(url, timeout=10.0)
+            if resp.status_code == 200 and resp.content:
+                logger.debug("Downloaded image (%d bytes) from %s", len(resp.content), url)
+                return resp.content
+            logger.warning("Failed to download image %s (HTTP %d)", url, resp.status_code)
+            return None
         except Exception as exc:  # noqa: BLE001
             logger.warning("Failed to download image %s — skipping. Reason: %s", url, exc)
-    return results
+            return None
+
+    results = await asyncio.gather(*[_fetch_one(u) for u in target_urls])
+    return [b for b in results if b is not None]
 
 
 def extract_image_urls(offer: dict[str, Any]) -> list[str]:

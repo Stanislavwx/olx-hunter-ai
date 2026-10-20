@@ -10,6 +10,7 @@ Orchestrates:
 """
 
 import asyncio
+import json
 import logging
 import os
 import signal
@@ -89,11 +90,32 @@ async def process_offer(
         logger.debug("Offer %s already seen for task '%s' — skipping", offer_id, task_name)
         return False
 
+    title = offer.get("title", "")
+
+    # Step 1.5 — Fast Title Pre-filtering (Negative keywords / stop-words)
+    exclude_keywords = task.get("exclude_keywords") or []
+    if isinstance(exclude_keywords, str):
+        try:
+            exclude_keywords = json.loads(exclude_keywords)
+        except Exception:
+            exclude_keywords = []
+
+    matched_exclude = next((kw for kw in exclude_keywords if kw.lower() in title.lower()), None)
+    if matched_exclude:
+        logger.info(
+            "Offer %s '%s' pre-filtered by keyword '%s' — skipping AI analysis",
+            offer_id,
+            title[:60],
+            matched_exclude,
+        )
+        await mark_offer_seen(offer_id, task_id, task_name)
+        return False
+
     await record_scanned(1)
-    logger.info("New offer [%s] '%s'", offer_id, offer.get("title", "")[:70])
+    logger.info("New offer [%s] '%s'", offer_id, title[:70])
 
     try:
-        # Step 2 — Image download
+        # Step 2 — Parallel image download
         image_urls = extract_image_urls(offer)
         max_imgs = int(os.environ.get("MAX_OFFER_IMAGES", 8))
         image_bytes_list = await download_images(client, image_urls, max_images=max_imgs)
@@ -101,6 +123,9 @@ async def process_offer(
         # Step 3 — Gemini AI analysis
         ai_prompt: str = task.get("ai_prompt", "Evaluate this listing.")
         analysis = await analyze_offer(offer, image_bytes_list, ai_prompt)
+
+        # Courtesy pause after AI evaluation to prevent Gemini 429 rate limit spikes
+        await asyncio.sleep(1.0)
 
         if analysis is None:
             logger.warning("AI analysis returned None for offer %s — leaving unseen to retry later", offer_id)
@@ -112,7 +137,7 @@ async def process_offer(
         if analysis.get("is_good_deal"):
             # Step 5 — Telegram alert
             logger.info("🔥 GOOD DEAL DETECTED for offer %s: '%s' (confidence: %d%%)",
-                        offer_id, offer.get("title", "")[:50], analysis.get("confidence", 0))
+                        offer_id, title[:50], analysis.get("confidence", 0))
             await send_alert(offer, analysis, task_name)
             return True
         else:
@@ -167,6 +192,15 @@ async def scan_task(
     if task.get("price_to"):
         params["filter_float_price:to"] = str(task["price_to"])
 
+    extra_params = task.get("extra_params") or {}
+    if isinstance(extra_params, str):
+        try:
+            extra_params = json.loads(extra_params)
+        except Exception:
+            extra_params = {}
+    if isinstance(extra_params, dict):
+        params.update(extra_params)
+
     mode_label = "ПОВНИЙ ПІДБІР" if deep_scan else "фоновий моніторинг"
     logger.info("→ Scanning task '%s' [%s] (query: '%s', cat: %s, price: %s-%s грн, max_pages: %d)",
                 task_name, mode_label, params["query"], cat_id or "all", task.get("price_from", 0), task.get("price_to", 0), max_pages)
@@ -198,9 +232,6 @@ async def scan_task(
             deal_found = await process_offer(client, offer, task)
             if deal_found:
                 deals_count += 1
-
-            # Courtesy pause between AI evaluations (prevents Gemini 429 rate limit spikes)
-            await asyncio.sleep(1.5)
 
         # In regular monitoring, if an entire page has 0 new offers, older listings are already known
         if new_on_this_page == 0 and not deep_scan:
