@@ -55,8 +55,11 @@ async def fetch_offers(
     base_params.setdefault("limit", 40)
     base_params.setdefault("sort_by", "created_at:desc")
 
+    start_offset = int(base_params.get("offset", 0))
+    limit = int(base_params.get("limit", 40))
+
     for page in range(max_pages):
-        base_params["offset"] = page * int(base_params["limit"])
+        base_params["offset"] = start_offset + (page * limit)
         backoff = BACKOFF_BASE
 
         while True:

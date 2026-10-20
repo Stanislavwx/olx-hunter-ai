@@ -43,8 +43,23 @@ TELEGRAM_API = "https://api.telegram.org/bot{token}/{method}"
 # FSM state: chat_id -> {"state": str, "task_id": int | None, "prompt_msg_id": int | None}
 _user_fsm: dict[int, dict[str, Any]] = {}
 
-# Event triggered when user clicks "Scan Now"
+# Events triggered from Telegram
 scan_requested_event = asyncio.Event()
+deep_scan_requested_event = asyncio.Event()
+task_rescan_queue: set[int] = set()
+
+
+async def send_system_message(text: str) -> None:
+    """Send an operational status notification to the configured Telegram chat."""
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+    if not chat_id:
+        return
+    await _api_call("sendMessage", {
+        "chat_id": chat_id,
+        "text": text,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True,
+    })
 
 MESSAGES = {
     "ua": {
@@ -184,17 +199,38 @@ async def send_alert(
         f"{texts['footer']}"
     )
 
-    payload = {
-        "chat_id": chat_id,
-        "text": text,
-        "parse_mode": "HTML",
-        "disable_web_page_preview": False,
-        "reply_markup": {
-            "inline_keyboard": [[{"text": texts["btn_view"], "url": url}]]
-        },
-    }
+    photos = offer.get("photos", [])
+    photo_url = ""
+    if photos:
+        first_photo = photos[0].get("link", "")
+        if first_photo:
+            photo_url = first_photo.replace("{width}", "720").replace("{height}", "540")
 
-    res = await _api_call("sendMessage", payload)
+    res = {}
+    if photo_url and len(text) <= 1000:
+        photo_payload = {
+            "chat_id": chat_id,
+            "photo": photo_url,
+            "caption": text,
+            "parse_mode": "HTML",
+            "reply_markup": {
+                "inline_keyboard": [[{"text": texts["btn_view"], "url": url}]]
+            },
+        }
+        res = await _api_call("sendPhoto", photo_payload)
+
+    if not res.get("ok"):
+        payload = {
+            "chat_id": chat_id,
+            "text": text,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": False,
+            "reply_markup": {
+                "inline_keyboard": [[{"text": texts["btn_view"], "url": url}]]
+            },
+        }
+        res = await _api_call("sendMessage", payload)
+
     if res.get("ok"):
         await record_deal()
         return True
@@ -230,8 +266,11 @@ async def show_main_menu(chat_id: int, message_id: int | None = None) -> None:
                 {"text": f"📋 Мої завдання ({active_cnt}/{len(tasks)})", "callback_data": "menu_tasks"},
             ],
             [
+                {"text": "🚀 Повний підбір (знайти всі наявні)", "callback_data": "menu_deep_scan"},
+            ],
+            [
                 {"text": "➕ Додати завдання", "callback_data": "menu_add"},
-                {"text": "⚡ Сканувати зараз", "callback_data": "menu_scan"},
+                {"text": "⚡ Перевірити нові", "callback_data": "menu_scan"},
             ],
             [
                 {"text": "📊 Статистика", "callback_data": "menu_stats"},
@@ -316,7 +355,7 @@ async def show_task_detail(chat_id: int, task_id: int, message_id: int | None = 
         "inline_keyboard": [
             [
                 {"text": toggle_label, "callback_data": f"task_toggle_{task_id}"},
-                {"text": "🔄 Пересканувати", "callback_data": f"task_rescan_{task_id}"},
+                {"text": "🔎 Повний пошук (знайти всі)", "callback_data": f"task_rescan_{task_id}"},
             ],
             [
                 {"text": "✏️ Змінити промпт", "callback_data": f"task_edit_prompt_{task_id}"},
@@ -499,9 +538,13 @@ async def handle_message(msg: dict[str, Any]) -> None:
             )
             await _api_call("sendMessage", {
                 "chat_id": chat_id,
-                "text": f"✅ <b>Завдання «{name}» успішно створено!</b>",
+                "text": (
+                    f"✅ <b>Завдання «{name}» успішно створено!</b>\n"
+                    "🚀 <i>Запущено повний підбір варіантів на OLX за вашими правилами...</i>"
+                ),
                 "parse_mode": "HTML",
             })
+            task_rescan_queue.add(new_id)
             scan_requested_event.set()
             await show_task_detail(chat_id, new_id)
             return
@@ -551,18 +594,41 @@ async def handle_callback_query(cb: dict[str, Any]) -> None:
         scan_requested_event.set()
         await _api_call("answerCallbackQuery", {
             "callback_query_id": cb_id,
-            "text": "⚡ Сканування всіх завдань запущено!",
+            "text": "⚡ Перевірка нових оголошень запущена!",
             "show_alert": False,
         })
+    elif data == "menu_deep_scan":
+        await clear_all_seen_offers()
+        deep_scan_requested_event.set()
+        await _api_call("answerCallbackQuery", {
+            "callback_query_id": cb_id,
+            "text": "🚀 Повний підбір усіх варіантів запущено!",
+            "show_alert": False,
+        })
+        await send_system_message(
+            "🚀 <b>Запущено повний підбір усіх наявних варіантів на OLX!</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "🔍 Завантажуємо всі сторінки ринку та детально оцінюємо через ШІ Gemini.\n"
+            "Всі вигідні пропозиції з'являтимуться тут 👇"
+        )
     elif data.startswith("task_rescan_"):
         t_id = int(data.replace("task_rescan_", ""))
+        task = await get_task_by_id(t_id)
+        t_name = task["name"] if task else f"ID {t_id}"
         cleared = await clear_seen_offers_for_task(t_id)
+        task_rescan_queue.add(t_id)
         scan_requested_event.set()
         await _api_call("answerCallbackQuery", {
             "callback_query_id": cb_id,
-            "text": f"🔄 Скинуто {cleared} оголошень. Запущено пересканування!",
+            "text": f"🔎 Повний пошук для «{t_name}» запущено!",
             "show_alert": False,
         })
+        await send_system_message(
+            f"🔎 <b>Запущено повний підбір варіантів для «{t_name}»!</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            f"Скинуто {cleared} оголошень з бази. Скануємо всі наявні оголошення на OLX за вашими правилами...\n"
+            "Знайдені вигідні варіанти будуть надіслані нижче 👇"
+        )
     elif data == "menu_clear_cache":
         cleared = await clear_all_seen_offers()
         await _api_call("answerCallbackQuery", {
@@ -581,7 +647,7 @@ async def handle_callback_query(cb: dict[str, Any]) -> None:
         _user_fsm.pop(chat_id, None)
 
     # 1. Navigation
-    if data == "menu_main":
+    if data in ("menu_main", "menu_deep_scan"):
         await show_main_menu(chat_id, message_id=msg_id)
 
     elif data == "menu_tasks":

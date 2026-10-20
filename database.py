@@ -77,11 +77,18 @@ async def init_db() -> None:
                 price_to       INTEGER DEFAULT 0,
                 ai_prompt      TEXT NOT NULL,
                 poll_interval  INTEGER DEFAULT 300,
+                max_pages      INTEGER DEFAULT 3,
                 is_active      INTEGER DEFAULT 1,
                 created_at     DATETIME DEFAULT CURRENT_TIMESTAMP
             )
             """
         )
+
+        # Migration check: ensure max_pages column exists
+        async with db.execute("PRAGMA table_info(tasks)") as cur:
+            t_cols = [row["name"] for row in await cur.fetchall()]
+        if "max_pages" not in t_cols:
+            await db.execute("ALTER TABLE tasks ADD COLUMN max_pages INTEGER DEFAULT 3")
 
         # 3. Settings table
         await db.execute(
@@ -119,6 +126,7 @@ async def init_db() -> None:
                     p_from = int(params.get("filter_float_price:from", 0))
                     p_to = int(params.get("filter_float_price:to", 0))
                     t_name = t.get("name", "Unnamed")
+                    t_max_pages = int(t.get("max_pages", 3))
 
                     async with db.execute("SELECT id FROM tasks WHERE name = ?", (t_name,)) as cur:
                         existing = await cur.fetchone()
@@ -126,7 +134,7 @@ async def init_db() -> None:
                     if existing:
                         await db.execute(
                             """
-                            UPDATE tasks SET category_id = ?, query = ?, price_from = ?, price_to = ?, ai_prompt = ?, poll_interval = ?
+                            UPDATE tasks SET category_id = ?, query = ?, price_from = ?, price_to = ?, ai_prompt = ?, poll_interval = ?, max_pages = ?
                             WHERE id = ?
                             """,
                             (
@@ -136,14 +144,15 @@ async def init_db() -> None:
                                 p_to,
                                 t.get("ai_prompt", "Evaluate offer."),
                                 int(t.get("poll_interval_seconds", 300)),
+                                t_max_pages,
                                 existing["id"],
                             ),
                         )
                     else:
                         await db.execute(
                             """
-                            INSERT INTO tasks (name, category_id, query, price_from, price_to, ai_prompt, poll_interval, is_active)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+                            INSERT INTO tasks (name, category_id, query, price_from, price_to, ai_prompt, poll_interval, max_pages, is_active)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
                             """,
                             (
                                 t_name,
@@ -153,6 +162,7 @@ async def init_db() -> None:
                                 p_to,
                                 t.get("ai_prompt", "Evaluate offer."),
                                 int(t.get("poll_interval_seconds", 300)),
+                                t_max_pages,
                             ),
                         )
                 logger.info("Synchronized tasks from config.json into SQLite database.")
@@ -168,10 +178,14 @@ async def init_db() -> None:
 async def is_offer_seen(offer_id: str, task_id: int = 0) -> bool:
     """Return True if this offer_id has already been processed for this specific task."""
     async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute(
-            "SELECT 1 FROM seen_offers WHERE offer_id = ? AND (task_id = ? OR task_id = 0)",
-            (offer_id, task_id),
-        ) as cursor:
+        if task_id > 0:
+            query = "SELECT 1 FROM seen_offers WHERE offer_id = ? AND task_id = ?"
+            params = (offer_id, task_id)
+        else:
+            query = "SELECT 1 FROM seen_offers WHERE offer_id = ?"
+            params = (offer_id,)
+
+        async with db.execute(query, params) as cursor:
             row = await cursor.fetchone()
             return row is not None
 
@@ -251,15 +265,16 @@ async def add_task(
     price_to: int,
     ai_prompt: str,
     poll_interval: int = 300,
+    max_pages: int = 3,
 ) -> int:
     """Create a new search task in SQLite. Returns the new task ID."""
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
             """
-            INSERT INTO tasks (name, query, category_id, price_from, price_to, ai_prompt, poll_interval, is_active)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+            INSERT INTO tasks (name, query, category_id, price_from, price_to, ai_prompt, poll_interval, max_pages, is_active)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
             """,
-            (name, query, category_id, price_from, price_to, ai_prompt, poll_interval),
+            (name, query, category_id, price_from, price_to, ai_prompt, poll_interval, max_pages),
         )
         await db.commit()
         return cursor.lastrowid or 0
